@@ -4,11 +4,14 @@ struct PlaylistView: View {
     @Bindable var viewModel: PlayerViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("播放列表")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
+                Text("\(viewModel.playlist.count)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
                 Spacer()
                 Toggle(isOn: $viewModel.autoPlayNext) {
                     Text("自动连播")
@@ -29,58 +32,24 @@ struct PlaylistView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 8)
             } else {
-                List {
+                VStack(spacing: 10) {
                     ForEach(viewModel.playlist) { item in
+                        let isCurrent = viewModel.currentItem?.id == item.id
                         Button {
                             viewModel.selectItem(id: item.id)
                         } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: viewModel.currentItem?.id == item.id ? "waveform" : "film")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(
-                                        viewModel.currentItem?.id == item.id
-                                        ? Theme.accent
-                                        : Theme.textTertiary
-                                    )
-                                    .frame(width: 20)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.title)
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundStyle(Theme.textPrimary)
-                                        .lineLimit(1)
-                                    if let duration = item.duration {
-                                        Text(formatDuration(duration))
-                                            .font(.system(size: 11).monospacedDigit())
-                                            .foregroundStyle(Theme.textSecondary)
-                                    }
-                                }
-                                Spacer()
-                                if viewModel.currentItem?.id == item.id {
-                                    Text("播放中")
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(Theme.textSecondary)
-                                }
-                            }
-                            .padding(.vertical, 4)
+                            PlaylistCard(item: item, isCurrent: isCurrent)
                         }
-                        .listRowBackground(
-                            viewModel.currentItem?.id == item.id
-                            ? Theme.surfaceElevated
-                            : Theme.surface
-                        )
-                        .listRowSeparatorTint(Theme.border)
-                    }
-                    .onDelete { indexSet in
-                        for index in indexSet {
-                            let id = viewModel.playlist[index].id
-                            viewModel.removeItem(id: id)
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                viewModel.removeItem(id: item.id)
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
                         }
                     }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .frame(minHeight: 120, maxHeight: 260)
             }
         }
         .padding(14)
@@ -90,6 +59,66 @@ struct PlaylistView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1)
         )
+    }
+}
+
+private struct PlaylistCard: View {
+    let item: PlaylistItem
+    let isCurrent: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isCurrent ? Theme.brandBlue.opacity(0.18) : Theme.surfaceElevated)
+                    .frame(width: 40, height: 40)
+                Image(systemName: isCurrent ? "video.fill" : "video")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isCurrent ? Theme.brandBlue : Theme.textTertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.system(size: 14, weight: isCurrent ? .semibold : .medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    if let duration = item.duration {
+                        Text(formatDuration(duration))
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    if isCurrent {
+                        Text("播放中")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.brandBlue)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Theme.brandBlue.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: isCurrent ? "waveform" : "chevron.right")
+                .font(.system(size: isCurrent ? 12 : 11, weight: .semibold))
+                .foregroundStyle(isCurrent ? Theme.brandBlue : Theme.textTertiary)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isCurrent ? Theme.brandBlue.opacity(0.08) : Theme.background.opacity(0.55))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(
+                    isCurrent ? Theme.brandBlue.opacity(0.55) : Theme.border,
+                    lineWidth: isCurrent ? 1.2 : 1
+                )
+        )
+        .shadow(color: isCurrent ? Theme.brandBlue.opacity(0.18) : .clear, radius: 10, y: 2)
     }
 
     private func formatDuration(_ value: TimeInterval) -> String {

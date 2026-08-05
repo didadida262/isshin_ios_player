@@ -6,6 +6,7 @@ struct IsshinPlayerApp: App {
         WindowGroup {
             PlayerView()
                 .preferredColorScheme(.dark)
+                .tint(Theme.selectionGreen)
                 .background(Theme.background.ignoresSafeArea())
         }
     }

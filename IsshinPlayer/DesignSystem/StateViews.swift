@@ -19,12 +19,8 @@ struct EmptyStateView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Image("IsshinLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 96, height: 96)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        VStack(spacing: 18) {
+            BrandLogoView(size: .hero)
             Text(title)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
@@ -32,6 +28,7 @@ struct EmptyStateView: View {
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
             if let actionTitle, let action {
                 Button(action: action) {
                     Label(actionTitle, systemImage: "photo.on.rectangle")

@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 @Observable
@@ -16,6 +17,7 @@ final class PlayerViewModel {
 
     var playbackRate: Float = PlaybackRate.x1.rawValue
     var autoPlayNext = true
+    var toastMessage: String?
 
     let player = AVPlayer()
     let pipManager = PictureInPictureManager()
@@ -27,6 +29,8 @@ final class PlayerViewModel {
     private var rateObservation: NSKeyValueObservation?
     private var wasPlayingBeforeSeek = false
     private var importGeneration = 0
+    private var loadTask: Task<Void, Never>?
+    private var loadSequence = 0
 
     var currentItem: PlaylistItem? {
         guard let currentIndex, playlist.indices.contains(currentIndex) else { return nil }
@@ -45,6 +49,7 @@ final class PlayerViewModel {
 
     init() {
         AudioSessionManager.activatePlayback()
+        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         nowPlaying.bind(to: self)
         observePlayer()
         observeInterruptions()
@@ -66,19 +71,27 @@ final class PlayerViewModel {
         phase = playlist.isEmpty ? .loading : phase
 
         var added: [PlaylistItem] = []
-        for (offset, item) in items.enumerated() {
+        var failed = 0
+
+        for item in items {
             guard generation == importGeneration else { return }
             do {
-                guard let movie = try await item.loadTransferable(type: ImportedMovie.self) else {
+                guard let movie = try await Self.resolveMovie(from: item) else {
+                    failed += 1
                     continue
                 }
-                let title = movie.suggestedName ?? "视频 \(playlist.count + added.count + 1)"
+                let index = playlist.count + added.count + 1
+                let rawName = movie.suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let title: String = {
+                    guard let rawName, !rawName.isEmpty, !looksLikeUUIDFileName(rawName) else {
+                        return "视频 \(index)"
+                    }
+                    return rawName
+                }()
                 let duration = await Self.loadDuration(url: movie.url)
                 added.append(PlaylistItem(title: title, fileURL: movie.url, duration: duration))
             } catch {
-                if playlist.isEmpty && added.isEmpty && offset == items.count - 1 {
-                    phase = .error("导入失败：\(error.localizedDescription)")
-                }
+                failed += 1
             }
         }
 
@@ -92,9 +105,36 @@ final class PlayerViewModel {
         }
 
         playlist.append(contentsOf: added)
-        if !hadCurrent, let first = playlist.first {
-            await load(item: first, autoPlay: true)
+        if !hadCurrent, let first = added.first ?? playlist.first {
+            enqueueLoad(first, autoPlay: true)
+        } else if phase == .loading {
+            phase = currentItem == nil ? .empty : .ready
         }
+
+        if failed > 0 {
+            // Keep playing; surface soft notice via phase only when nothing was playing
+            print("Import partial failure: \(failed)/\(items.count) skipped")
+        }
+    }
+
+    private func looksLikeUUIDFileName(_ name: String) -> Bool {
+        name.count >= 16 && name.filter { $0 == "-" }.count >= 2
+    }
+
+    private static func resolveMovie(from item: PhotosPickerItem) async throws -> ImportedMovie? {
+        if let movie = try await item.loadTransferable(type: ImportedMovie.self) {
+            return movie
+        }
+        // Fallback: some Photos assets don't match UTType.movie cleanly
+        if let data = try await item.loadTransferable(type: Data.self), !data.isEmpty {
+            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Imports", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let dest = dir.appendingPathComponent("\(UUID().uuidString).mp4")
+            try data.write(to: dest, options: .atomic)
+            return ImportedMovie(url: dest, suggestedName: nil)
+        }
+        return nil
     }
 
     // MARK: - Playlist
@@ -102,7 +142,7 @@ final class PlayerViewModel {
     func selectItem(id: UUID) {
         guard let index = playlist.firstIndex(where: { $0.id == id }) else { return }
         guard index != currentIndex else { return }
-        Task { await load(item: playlist[index], autoPlay: true) }
+        enqueueLoad(playlist[index], autoPlay: true)
     }
 
     func removeItem(id: UUID) {
@@ -114,6 +154,7 @@ final class PlayerViewModel {
         try? FileManager.default.removeItem(at: fileURL)
 
         if playlist.isEmpty {
+            loadTask?.cancel()
             currentIndex = nil
             stopAndClear()
             phase = .empty
@@ -123,7 +164,7 @@ final class PlayerViewModel {
 
         if removingCurrent {
             let nextIndex = min(index, playlist.count - 1)
-            Task { await load(item: playlist[nextIndex], autoPlay: true) }
+            enqueueLoad(playlist[nextIndex], autoPlay: true)
         } else if let currentIndex, index < currentIndex {
             self.currentIndex = currentIndex - 1
         }
@@ -131,12 +172,17 @@ final class PlayerViewModel {
 
     func playNext() {
         guard let currentIndex, currentIndex + 1 < playlist.count else { return }
-        Task { await load(item: playlist[currentIndex + 1], autoPlay: true) }
+        enqueueLoad(playlist[currentIndex + 1], autoPlay: true)
     }
 
     func playPrevious() {
         guard let currentIndex, currentIndex > 0 else { return }
-        Task { await load(item: playlist[currentIndex - 1], autoPlay: true) }
+        enqueueLoad(playlist[currentIndex - 1], autoPlay: true)
+    }
+
+    private func enqueueLoad(_ item: PlaylistItem, autoPlay: Bool) {
+        loadTask?.cancel()
+        loadTask = Task { await load(item: item, autoPlay: autoPlay) }
     }
 
     // MARK: - Transport
@@ -200,50 +246,113 @@ final class PlayerViewModel {
     }
 
     func startPiP() {
-        pipManager.start()
+        // Prefer playing before requesting PiP — improves isPictureInPicturePossible.
+        if !isPlaying { play() }
+        if let message = pipManager.start() {
+            showToast(message)
+        }
+    }
+
+    func showToast(_ message: String) {
+        toastMessage = message
+        Task {
+            try? await Task.sleep(for: .seconds(2.4))
+            if toastMessage == message {
+                toastMessage = nil
+            }
+        }
     }
 
     // MARK: - Load
 
     private func load(item: PlaylistItem, autoPlay: Bool) async {
-        phase = .loading
+        loadSequence += 1
+        let sequence = loadSequence
+
+        // Switching tracks: keep `.ready` so the player layer is not torn down (avoids UI freeze).
+        if case .empty = phase {
+            phase = .loading
+        } else if case .error = phase {
+            phase = .loading
+        }
+
+        player.pause()
+        isPlaying = false
         currentTime = 0
         duration = item.duration ?? 0
         currentIndex = playlist.firstIndex(where: { $0.id == item.id })
 
         removeEndObserver()
         statusObservation?.invalidate()
+        statusObservation = nil
 
         let playerItem = AVPlayerItem(url: item.fileURL)
         player.replaceCurrentItem(with: playerItem)
 
-        statusObservation = playerItem.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-            Task { @MainActor in
-                guard let self else { return }
-                switch item.status {
-                case .readyToPlay:
-                    let seconds = item.duration.seconds
-                    if seconds.isFinite && !seconds.isNaN {
-                        self.duration = seconds
-                        if let idx = self.currentIndex {
-                            self.playlist[idx].duration = seconds
-                        }
-                    }
-                    self.phase = .ready
-                    self.nowPlaying.updateNowPlaying()
-                    if autoPlay {
-                        self.play()
-                    }
-                case .failed:
-                    let message = item.error?.localizedDescription ?? "无法播放该视频"
-                    self.phase = .error(message)
-                    self.isPlaying = false
-                default:
-                    break
+        let status = await Self.waitForReady(playerItem)
+        guard !Task.isCancelled, sequence == loadSequence else { return }
+        guard currentIndex == playlist.firstIndex(where: { $0.id == item.id }) else { return }
+
+        switch status {
+        case .readyToPlay:
+            let seconds = playerItem.duration.seconds
+            if seconds.isFinite && !seconds.isNaN && seconds > 0 {
+                duration = seconds
+                if let idx = currentIndex {
+                    playlist[idx].duration = seconds
                 }
             }
+            phase = .ready
+            nowPlaying.updateNowPlaying()
+            installEndObserver(for: playerItem)
+            if autoPlay {
+                play()
+            }
+        case .failed:
+            let message = playerItem.error?.localizedDescription ?? "无法播放该视频"
+            phase = .error(message)
+            isPlaying = false
+        default:
+            phase = .error("加载超时，请重试")
+            isPlaying = false
+        }
+    }
+
+    private static func waitForReady(_ item: AVPlayerItem) async -> AVPlayerItem.Status {
+        if item.status == .readyToPlay || item.status == .failed {
+            return item.status
         }
 
+        return await withCheckedContinuation { continuation in
+            final class Box: @unchecked Sendable {
+                var resumed = false
+                var observation: NSKeyValueObservation?
+                var timeoutTask: Task<Void, Never>?
+            }
+            let box = Box()
+
+            let finish: @Sendable (AVPlayerItem.Status) -> Void = { status in
+                guard !box.resumed else { return }
+                box.resumed = true
+                box.observation?.invalidate()
+                box.timeoutTask?.cancel()
+                continuation.resume(returning: status)
+            }
+
+            box.observation = item.observe(\.status, options: [.initial, .new]) { observed, _ in
+                if observed.status == .readyToPlay || observed.status == .failed {
+                    finish(observed.status)
+                }
+            }
+
+            box.timeoutTask = Task {
+                try? await Task.sleep(for: .seconds(10))
+                finish(item.status == .unknown ? .unknown : item.status)
+            }
+        }
+    }
+
+    private func installEndObserver(for playerItem: AVPlayerItem) {
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: playerItem,
@@ -346,16 +455,38 @@ struct ImportedMovie: Transferable {
         FileRepresentation(contentType: .movie) { movie in
             SentTransferredFile(movie.url)
         } importing: { received in
-            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("Imports", isDirectory: true)
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let name = received.file.lastPathComponent
-            let dest = dir.appendingPathComponent("\(UUID().uuidString)_\(name)")
-            if FileManager.default.fileExists(atPath: dest.path) {
-                try FileManager.default.removeItem(at: dest)
-            }
-            try FileManager.default.copyItem(at: received.file, to: dest)
-            return ImportedMovie(url: dest, suggestedName: received.file.deletingPathExtension().lastPathComponent)
+            try Self.importFile(received)
         }
+        FileRepresentation(contentType: .mpeg4Movie) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            try Self.importFile(received)
+        }
+        FileRepresentation(contentType: .quickTimeMovie) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            try Self.importFile(received)
+        }
+        FileRepresentation(contentType: .avi) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            try Self.importFile(received)
+        }
+    }
+
+    private static func importFile(_ received: ReceivedTransferredFile) throws -> ImportedMovie {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Imports", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let name = received.file.lastPathComponent
+        let dest = dir.appendingPathComponent("\(UUID().uuidString)_\(name)")
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try FileManager.default.removeItem(at: dest)
+        }
+        try FileManager.default.copyItem(at: received.file, to: dest)
+        return ImportedMovie(
+            url: dest,
+            suggestedName: received.file.deletingPathExtension().lastPathComponent
+        )
     }
 }

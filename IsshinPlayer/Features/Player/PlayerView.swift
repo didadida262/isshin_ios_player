@@ -10,7 +10,6 @@ struct PlayerView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     canvas
-                    PlayerControlsView(viewModel: viewModel)
                     PlaylistView(viewModel: viewModel)
                 }
                 .padding(16)
@@ -18,18 +17,6 @@ struct PlayerView: View {
             .background(Theme.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 8) {
-                        Image("IsshinLogo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 28, height: 28)
-                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                        Text("Isshin")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     PhotosPicker(
                         selection: $pickerItems,
@@ -41,12 +28,29 @@ struct PlayerView: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
                     }
+                    .tint(Theme.selectionGreen)
                 }
             }
             .toolbarBackground(Theme.background, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
+        .overlay(alignment: .bottom) {
+            if let toast = viewModel.toastMessage {
+                Text(toast)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 28)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
         .onChange(of: pickerItems) { _, newItems in
             guard !newItems.isEmpty else { return }
             Task {
@@ -78,8 +82,11 @@ struct PlayerView: View {
                 SkeletonBlock(height: 240)
                     .padding(12)
             case .ready:
-                PlayerLayerView(player: viewModel.player) { layer in
-                    viewModel.pipManager.attach(playerLayer: layer)
+                ZStack {
+                    PlayerLayerView(player: viewModel.player) { layer in
+                        viewModel.pipManager.attach(playerLayer: layer)
+                    }
+                    PlayerControlsView(viewModel: viewModel)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .padding(8)
@@ -95,7 +102,8 @@ struct PlayerView: View {
                 }
             }
         }
-        .frame(minHeight: 260)
+        .frame(minHeight: 280)
+        .aspectRatio(16 / 10, contentMode: .fit)
         .animation(.easeInOut(duration: 0.2), value: viewModel.phase)
     }
 }

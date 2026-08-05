@@ -3,25 +3,41 @@ import AVKit
 @MainActor
 @Observable
 final class PictureInPictureManager: NSObject, AVPictureInPictureControllerDelegate {
+    var isSupported = AVPictureInPictureController.isPictureInPictureSupported()
     var isPossible = false
     var isActive = false
+    var lastErrorMessage: String?
 
     private var controller: AVPictureInPictureController?
     private var observations: [NSKeyValueObservation] = []
+    private weak var boundLayer: AVPlayerLayer?
 
     func attach(playerLayer: AVPlayerLayer) {
-        // Re-attach only when layer identity changes
-        if controller?.playerLayer === playerLayer { return }
+        guard playerLayer.bounds.width > 1, playerLayer.bounds.height > 1 else { return }
+
+        if boundLayer === playerLayer, controller != nil {
+            refreshPossible()
+            return
+        }
 
         tearDown()
+        boundLayer = playerLayer
 
-        guard AVPictureInPictureController.isPictureInPictureSupported() else {
+        guard isSupported else {
             isPossible = false
             return
         }
 
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+
         guard let pip = AVPictureInPictureController(playerLayer: playerLayer) else {
             isPossible = false
+            lastErrorMessage = "无法创建画中画控制器"
             return
         }
 
@@ -41,13 +57,33 @@ final class PictureInPictureManager: NSObject, AVPictureInPictureControllerDeleg
         })
     }
 
-    func start() {
-        guard let controller, controller.isPictureInPicturePossible else { return }
+    @discardableResult
+    func start() -> String? {
+        guard isSupported else {
+            return "当前环境不支持画中画"
+        }
+        guard let controller else {
+            return "播放器未就绪，请稍后再试"
+        }
+        guard controller.isPictureInPicturePossible else {
+            // Simulator commonly stays false forever.
+            #if targetEnvironment(simulator)
+            return "模拟器通常无法使用画中画，请用真机测试"
+            #else
+            return "画中画暂不可用，请确认视频已开始播放后再试"
+            #endif
+        }
+        lastErrorMessage = nil
         controller.startPictureInPicture()
+        return nil
     }
 
     func stop() {
         controller?.stopPictureInPicture()
+    }
+
+    private func refreshPossible() {
+        isPossible = controller?.isPictureInPicturePossible ?? false
     }
 
     private func tearDown() {
@@ -55,6 +91,7 @@ final class PictureInPictureManager: NSObject, AVPictureInPictureControllerDeleg
         observations.removeAll()
         controller?.delegate = nil
         controller = nil
+        boundLayer = nil
         isPossible = false
         isActive = false
     }
@@ -62,7 +99,10 @@ final class PictureInPictureManager: NSObject, AVPictureInPictureControllerDeleg
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(
         _ pictureInPictureController: AVPictureInPictureController
     ) {
-        Task { @MainActor in isActive = true }
+        Task { @MainActor in
+            isActive = true
+            lastErrorMessage = nil
+        }
     }
 
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(
@@ -75,6 +115,9 @@ final class PictureInPictureManager: NSObject, AVPictureInPictureControllerDeleg
         _ pictureInPictureController: AVPictureInPictureController,
         failedToStartPictureInPictureWithError error: Error
     ) {
-        Task { @MainActor in isActive = false }
+        Task { @MainActor in
+            isActive = false
+            lastErrorMessage = error.localizedDescription
+        }
     }
 }
