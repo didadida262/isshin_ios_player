@@ -20,6 +20,8 @@ struct PlaylistView: View {
                 }
                 .toggleStyle(.switch)
                 .labelsHidden()
+                .scaleEffect(0.72)
+                .padding(.trailing, -6)
                 Text("自动连播")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)

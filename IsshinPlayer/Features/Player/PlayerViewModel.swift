@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Photos
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -62,8 +63,8 @@ final class PlayerViewModel {
 
     // MARK: - Import
 
-    func importVideos(from items: [PhotosPickerItem]) async {
-        guard !items.isEmpty else { return }
+    func importVideos(from results: [PHPickerResult]) async {
+        guard !results.isEmpty else { return }
         importGeneration += 1
         let generation = importGeneration
         let hadCurrent = currentItem != nil
@@ -73,21 +74,15 @@ final class PlayerViewModel {
         var added: [PlaylistItem] = []
         var failed = 0
 
-        for item in items {
+        for result in results {
             guard generation == importGeneration else { return }
             do {
-                guard let movie = try await Self.resolveMovie(from: item) else {
+                guard let movie = try await Self.resolveMovie(from: result.itemProvider) else {
                     failed += 1
                     continue
                 }
                 let index = playlist.count + added.count + 1
-                let rawName = movie.suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let title: String = {
-                    guard let rawName, !rawName.isEmpty, !looksLikeUUIDFileName(rawName) else {
-                        return "视频 \(index)"
-                    }
-                    return rawName
-                }()
+                let title = Self.displayTitle(for: result, imported: movie, fallbackIndex: index)
                 let duration = await Self.loadDuration(url: movie.url)
                 added.append(PlaylistItem(title: title, fileURL: movie.url, duration: duration))
             } catch {
@@ -112,29 +107,140 @@ final class PlayerViewModel {
         }
 
         if failed > 0 {
-            // Keep playing; surface soft notice via phase only when nothing was playing
-            print("Import partial failure: \(failed)/\(items.count) skipped")
+            print("Import partial failure: \(failed)/\(results.count) skipped")
         }
     }
 
-    private func looksLikeUUIDFileName(_ name: String) -> Bool {
-        name.count >= 16 && name.filter { $0 == "-" }.count >= 2
+    private static func displayTitle(
+        for result: PHPickerResult,
+        imported: ImportedMovie,
+        fallbackIndex: Int
+    ) -> String {
+        if let photosName = originalFilenameFromPhotos(assetIdentifier: result.assetIdentifier) {
+            return stripExtension(photosName)
+        }
+
+        if let suggested = result.itemProvider.suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !suggested.isEmpty {
+            return stripExtension(suggested)
+        }
+
+        if let importedName = imported.suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !importedName.isEmpty,
+           !looksLikeGeneratedName(importedName) {
+            return stripExtension(importedName)
+        }
+
+        let fileName = imported.url.deletingPathExtension().lastPathComponent
+        let cleaned = fileName.replacingOccurrences(
+            of: #"^[0-9A-Fa-f-]{36}_"#,
+            with: "",
+            options: String.CompareOptions.regularExpression
+        )
+        if !cleaned.isEmpty, !looksLikeGeneratedName(cleaned) {
+            return cleaned
+        }
+
+        return "视频 \(fallbackIndex)"
     }
 
-    private static func resolveMovie(from item: PhotosPickerItem) async throws -> ImportedMovie? {
-        if let movie = try await item.loadTransferable(type: ImportedMovie.self) {
-            return movie
+    private static func originalFilenameFromPhotos(assetIdentifier: String?) -> String? {
+        guard let assetIdentifier else { return nil }
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
+        guard let asset = assets.firstObject else { return nil }
+        let resources = PHAssetResource.assetResources(for: asset)
+        if let video = resources.first(where: { $0.type == .video }) {
+            return video.originalFilename
         }
-        // Fallback: some Photos assets don't match UTType.movie cleanly
-        if let data = try await item.loadTransferable(type: Data.self), !data.isEmpty {
-            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("Imports", isDirectory: true)
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let dest = dir.appendingPathComponent("\(UUID().uuidString).mp4")
-            try data.write(to: dest, options: .atomic)
-            return ImportedMovie(url: dest, suggestedName: nil)
+        return resources.first?.originalFilename
+    }
+
+    private static func stripExtension(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = (trimmed as NSString).deletingPathExtension
+        return base.isEmpty ? trimmed : base
+    }
+
+    private static func looksLikeGeneratedName(_ name: String) -> Bool {
+        // UUID or simulator placeholder style names
+        if name.range(
+            of: #"^[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}$"#,
+            options: String.CompareOptions.regularExpression
+        ) != nil {
+            return true
+        }
+        if name.count >= 16 && name.filter({ $0 == "-" }).count >= 2 {
+            return true
+        }
+        return false
+    }
+
+    private static func resolveMovie(from provider: NSItemProvider) async throws -> ImportedMovie? {
+        let preferredName = provider.suggestedName
+        let typeIdentifiers = [
+            UTType.movie.identifier,
+            UTType.mpeg4Movie.identifier,
+            UTType.quickTimeMovie.identifier,
+            UTType.avi.identifier,
+            "public.mpeg-2-video",
+            "com.apple.m4v-video"
+        ]
+
+        for typeID in typeIdentifiers where provider.hasItemConformingToTypeIdentifier(typeID) {
+            if let movie = try await loadMovieFile(
+                from: provider,
+                typeIdentifier: typeID,
+                preferredName: preferredName
+            ) {
+                return movie
+            }
+        }
+
+        for typeID in provider.registeredTypeIdentifiers {
+            if let movie = try await loadMovieFile(
+                from: provider,
+                typeIdentifier: typeID,
+                preferredName: preferredName
+            ) {
+                return movie
+            }
         }
         return nil
+    }
+
+    private static func loadMovieFile(
+        from provider: NSItemProvider,
+        typeIdentifier: String,
+        preferredName: String?
+    ) async throws -> ImportedMovie? {
+        try await withCheckedThrowingContinuation { continuation in
+            provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let url else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                do {
+                    let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                        .appendingPathComponent("Imports", isDirectory: true)
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let dest = dir.appendingPathComponent("\(UUID().uuidString)_\(url.lastPathComponent)")
+                    if FileManager.default.fileExists(atPath: dest.path) {
+                        try FileManager.default.removeItem(at: dest)
+                    }
+                    try FileManager.default.copyItem(at: url, to: dest)
+                    let fromProvider = preferredName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let fromFile = url.deletingPathExtension().lastPathComponent
+                    let suggested = (fromProvider?.isEmpty == false ? fromProvider : fromFile)
+                    continuation.resume(returning: ImportedMovie(url: dest, suggestedName: suggested))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 
     // MARK: - Playlist
@@ -445,48 +551,7 @@ final class PlayerViewModel {
     }
 }
 
-// MARK: - Transferable movie
-
-struct ImportedMovie: Transferable {
+struct ImportedMovie {
     let url: URL
     let suggestedName: String?
-
-    static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(contentType: .movie) { movie in
-            SentTransferredFile(movie.url)
-        } importing: { received in
-            try Self.importFile(received)
-        }
-        FileRepresentation(contentType: .mpeg4Movie) { movie in
-            SentTransferredFile(movie.url)
-        } importing: { received in
-            try Self.importFile(received)
-        }
-        FileRepresentation(contentType: .quickTimeMovie) { movie in
-            SentTransferredFile(movie.url)
-        } importing: { received in
-            try Self.importFile(received)
-        }
-        FileRepresentation(contentType: .avi) { movie in
-            SentTransferredFile(movie.url)
-        } importing: { received in
-            try Self.importFile(received)
-        }
-    }
-
-    private static func importFile(_ received: ReceivedTransferredFile) throws -> ImportedMovie {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Imports", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let name = received.file.lastPathComponent
-        let dest = dir.appendingPathComponent("\(UUID().uuidString)_\(name)")
-        if FileManager.default.fileExists(atPath: dest.path) {
-            try FileManager.default.removeItem(at: dest)
-        }
-        try FileManager.default.copyItem(at: received.file, to: dest)
-        return ImportedMovie(
-            url: dest,
-            suggestedName: received.file.deletingPathExtension().lastPathComponent
-        )
-    }
 }

@@ -8,7 +8,8 @@ struct PlayerControlsView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(visible ? 0.28 : 0.001)
+            // Transparent hit target only — no dim/scrim over the video.
+            Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture { toggleVisible() }
 
@@ -49,6 +50,7 @@ struct PlayerControlsView: View {
             Text(viewModel.currentItem?.title ?? "Isshin")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
                 .lineLimit(1)
 
             Spacer()
@@ -155,19 +157,12 @@ struct PlayerControlsView: View {
                 Text(formatTime(viewModel.duration))
             }
             .font(.system(size: 11, weight: .medium).monospacedDigit())
-            .foregroundStyle(.white.opacity(0.85))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 10)
         .padding(.horizontal, 8)
-        .background(
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.55)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .padding(.top, -20)
-        )
     }
 
     private var currentRateLabel: String {

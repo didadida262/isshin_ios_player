@@ -3,7 +3,7 @@ import SwiftUI
 
 struct PlayerView: View {
     @State private var viewModel = PlayerViewModel()
-    @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var showVideoPicker = false
 
     var body: some View {
         NavigationStack {
@@ -18,23 +18,29 @@ struct PlayerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    PhotosPicker(
-                        selection: $pickerItems,
-                        maxSelectionCount: 20,
-                        matching: .videos,
-                        photoLibrary: .shared()
-                    ) {
+                    Button {
+                        showVideoPicker = true
+                    } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
                     }
-                    .tint(Theme.selectionGreen)
                 }
             }
             .toolbarBackground(Theme.background, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .background {
+                VideoPhotosPicker(isPresented: $showVideoPicker) { results in
+                    Task {
+                        await viewModel.importVideos(from: results)
+                    }
+                }
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+            }
         }
         .preferredColorScheme(.dark)
+        .tint(Theme.selectionGreen)
         .overlay(alignment: .bottom) {
             if let toast = viewModel.toastMessage {
                 Text(toast)
@@ -51,13 +57,6 @@ struct PlayerView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
-        .onChange(of: pickerItems) { _, newItems in
-            guard !newItems.isEmpty else { return }
-            Task {
-                await viewModel.importVideos(from: newItems)
-                pickerItems = []
-            }
-        }
     }
 
     @ViewBuilder
