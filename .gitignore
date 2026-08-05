@@ -1,0 +1,90 @@
+# macOS / 通用
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+*~
+*.swp
+*.swo
+.idea/
+.vscode/
+*.log
+.env
+.env.*
+!.env.example
+
+# Xcode / Swift
+build/
+Build/
+DerivedData/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+timeline.xctimeline
+playground.xcworkspace
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+Pods/
+Carthage/Build/
+Carthage/Checkouts/
+*.play
+iOSInjectionProject/
+
+# 签名 / 证书 / 密钥（切勿提交）
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.cer
+*.certSigningRequest
+AuthKey_*.p8
+*.pem
+Secrets/
+secrets/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output/
+fastlane/readme.md
+
+# 测试 / 覆盖率
+*.gcno
+*.gcda
+coverage/
+*.xcresult
+test-results/
+
+# 包管理器杂项
+vendor/
+node_modules/
+
+# Cursor / 本地工具缓存（保留 .cursor/skills）
+.cursor/mcp.json
+*.tsbuildinfo
+
+# 临时与导出产物
+tmp/
+temp/
+*.tmp
+Exported/
