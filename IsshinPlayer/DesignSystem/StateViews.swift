@@ -20,9 +20,11 @@ struct EmptyStateView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Image(systemName: "film.stack")
-                .font(.system(size: 36, weight: .light))
-                .foregroundStyle(Theme.textTertiary)
+            Image("IsshinLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 96, height: 96)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             Text(title)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)

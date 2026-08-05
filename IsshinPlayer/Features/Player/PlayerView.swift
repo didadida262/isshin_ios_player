@@ -16,9 +16,20 @@ struct PlayerView: View {
                 .padding(16)
             }
             .background(Theme.background.ignoresSafeArea())
-            .navigationTitle("Isshin")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 8) {
+                        Image("IsshinLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 28, height: 28)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        Text("Isshin")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     PhotosPicker(
                         selection: $pickerItems,
