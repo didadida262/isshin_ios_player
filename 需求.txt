@@ -1,7 +1,7 @@
 实现一个极简 iOS 视频播放器（自用，不上架）。
 
 1. 技术栈：
-Swift 5.9+ / SwiftUI / AVFoundation / AVKit / PhotosUI
+Swift 5.9+ / SwiftUI / AVFoundation / AVKit / PhotosUI / MediaPlayer
 主题固定暗黑（Theme 常量注入即可），无亮色/切换；黑灰 Zinc/Slate 系
 图标优先 SF Symbols
 状态：@Observable / Observation
@@ -10,10 +10,13 @@ Swift 5.9+ / SwiftUI / AVFoundation / AVKit / PhotosUI
 
 2. 功能模块
 - 极简视频播放器
-  - 从 iOS 相册导入视频类型文件（PhotosPicker / PHPicker，仅 video）
+  - 从 iOS 相册导入视频（PhotosPicker / PHPicker，仅 video；支持多选加入播放列表）
+  - 播放列表：展示已导入条目；点选切换；删除；当前项高亮；播完自动下一首（可关）
   - 播放 / 暂停
   - 进度条（可拖动 seek）
-  - 音频后台播放（UIBackgroundModes = audio；锁屏/切后台可续播，控制中心可暂停）
+  - 倍速：0.5x / 0.75x / 1x / 1.25x / 1.5x / 2x（默认 1x，切换立即生效）
+  - 画中画（PiP）：支持系统画中画；前台控件可启动/停止（设备与系统支持时）
+  - 后台播放：切后台 / 锁屏声音续播；控制中心与锁屏可暂停/继续/切上下首（有列表时）
   - Loading / Empty / Error 三态；列表与播放器区域骨架屏，资源就绪后消失
 
 3. 整体主题风格
@@ -24,15 +27,15 @@ Theme 常量统一配色，禁止高饱和原生色；强制 `preferredColorSche
 4. 工程
 - 根目录 `.gitignore`（通用 + Xcode/iOS）；详细规格见 `PRD.md`
 - Xcode 工程结构建议：
-  App / Features/Player / Core(Theme、Permissions) / DesignSystem
+  App / Features/Player / Core(Theme、Audio、PiP、Permissions) / DesignSystem
 
 5. 整体页面布局
-iPhone：工具/入口 → 内容页（NavigationStack）
-首版可单页：上方播放器画布 + 下方控制条（播放暂停、进度）+ 导入入口
-若后续扩展多工具，再升级为入口列表 → 详情
+iPhone：NavigationStack 单页主界面
+上方播放器画布 + 控制条（播放暂停、进度、倍速、PiP）+ 下方播放列表 + 导入入口
 
 6. 加载与边界
 各模块骨架屏 / .redacted；无视频时空态引导导入；权限拒绝与加载失败有明确 Error 态
+PiP 不可用时隐藏或禁用入口并说明
 
 7. 图标
-默认 SF Symbols（play / pause / photo.on.rectangle 等）
+默认 SF Symbols（play / pause / forward / backward / gauge / pip / photo.on.rectangle 等）

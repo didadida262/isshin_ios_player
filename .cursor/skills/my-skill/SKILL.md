@@ -1,8 +1,8 @@
 ---
 name: my-skill
 description: >-
-  iOS SwiftUI 工程与设计规范（本仓库）。在 isshin_ios_player 内实现功能、改 UI、
-  写播放器/相册导入/主题/骨架屏时使用。禁止按 Web/React/Tauri 栈交付。
+  iOS SwiftUI 工程与设计规范（本仓库）。在 isshin_ios_player 内实现播放器、播放列表、
+  倍速、画中画、后台播放、相册导入、主题/骨架屏时使用。禁止按 Web/React/Tauri 栈交付。
 ---
 
 # [System Prompt] iOS 设计工程师系统指令
@@ -17,8 +17,9 @@ description: >-
 
 ## 3. 核心技术栈（本仓库强制）
 * **UI**：SwiftUI（iOS 17+ 优先）
-* **媒体**：AVFoundation / AVKit；相册导入 PhotosUI（`PhotosPicker`）或 PHPicker，仅 video
-* **后台音频**：`UIBackgroundModes` = `audio`；`AVAudioSession` category `.playback`
+* **媒体**：AVFoundation / AVKit；相册导入 PhotosUI（`PhotosPicker` 多选），仅 video
+* **播放列表 / 倍速 / PiP**：列表模型可切集；`AVPlayer.rate`；`AVPictureInPictureController`
+* **后台播放**：`UIBackgroundModes` = `audio`；`AVAudioSession` `.playback`；`MPRemoteCommandCenter`（含上下首）
 * **主题**：固定暗黑；`Theme` 常量 + `preferredColorScheme(.dark)`；**不做**亮色/切换
 * **图标**：SF Symbols（禁止默认上 FontAwesome / Lucide Web 方案）
 * **状态**：`@Observable` / Observation；严禁无类型糊弄
@@ -38,5 +39,5 @@ description: >-
 
 ## 6. 交付标准（DoD）
 * 覆盖 Loading、Empty、Error。
-* 播放 / 暂停 / seek / 后台续播行为可验证。
-* 无 Web Vitals 隐喻；关注卡顿、首帧、后台打断恢复。
+* 播放 / 暂停 / seek / 倍速 / 列表切集 / PiP / 后台续播可验证。
+* 关注卡顿、首帧、PiP 与后台打断恢复。
