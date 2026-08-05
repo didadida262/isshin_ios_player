@@ -20,7 +20,11 @@ final class PictureInPictureManager: NSObject, AVPictureInPictureControllerDeleg
             return
         }
 
-        let pip = AVPictureInPictureController(playerLayer: playerLayer)
+        guard let pip = AVPictureInPictureController(playerLayer: playerLayer) else {
+            isPossible = false
+            return
+        }
+
         pip.delegate = self
         pip.canStartPictureInPictureAutomaticallyFromInline = false
         controller = pip
