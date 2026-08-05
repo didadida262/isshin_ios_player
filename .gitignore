@@ -79,8 +79,8 @@ test-results/
 vendor/
 node_modules/
 
-# Cursor / 本地工具缓存（保留 .cursor/skills）
-.cursor/mcp.json
+# Cursor（本地配置 / skills，不入库）
+.cursor/
 *.tsbuildinfo
 
 # 临时与导出产物
