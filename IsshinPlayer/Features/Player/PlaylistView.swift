@@ -2,17 +2,34 @@ import SwiftUI
 
 struct PlaylistView: View {
     @Bindable var viewModel: PlayerViewModel
+    var onImport: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            HStack(spacing: 10) {
                 Text("播放列表")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text("\(viewModel.playlist.count)")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
+
+                Button(action: onImport) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .frame(width: 28, height: 28)
+                        .background(Theme.surfaceElevated)
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Theme.border, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+
                 Spacer()
+
                 Toggle(isOn: $viewModel.autoPlayNext) {
                     Text("自动连播")
                         .font(.system(size: 12))
@@ -28,7 +45,7 @@ struct PlaylistView: View {
             }
 
             if viewModel.playlist.isEmpty {
-                Text("暂无视频，点击右上角导入")
+                Text("暂无视频，点击 + 导入")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -10,23 +10,14 @@ struct PlayerView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     canvas
-                    PlaylistView(viewModel: viewModel)
+                    PlaylistView(viewModel: viewModel) {
+                        showVideoPicker = true
+                    }
                 }
                 .padding(16)
             }
             .background(Theme.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showVideoPicker = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                    }
-                }
-            }
             .toolbarBackground(Theme.background, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .background {
