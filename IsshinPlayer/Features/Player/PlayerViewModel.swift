@@ -386,7 +386,7 @@ final class PlayerViewModel {
         withTransaction(transaction) {
             isFullscreen = true
         }
-        OrientationManager.preferLandscapeFullscreen()
+        OrientationManager.lockLandscape()
         if !isPlaying {
             play()
         }

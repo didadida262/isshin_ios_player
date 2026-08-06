@@ -17,14 +17,15 @@ struct PlayerControlsView: View {
             if visible {
                 VStack(spacing: 0) {
                     topBar
-                    Spacer()
+                    Spacer(minLength: 0)
                     centerTransport
-                    Spacer()
+                    Spacer(minLength: 0)
                     bottomBar
                 }
-                .padding(12)
-                .padding(.top, isFullscreen ? 8 : 0)
-                .padding(.bottom, isFullscreen ? 8 : 0)
+                .padding(.horizontal, isFullscreen ? 20 : 8)
+                .padding(.vertical, isFullscreen ? 12 : 8)
+                .safeAreaPadding(.top, isFullscreen ? 4 : 0)
+                .safeAreaPadding(.bottom, isFullscreen ? 4 : 0)
                 .transition(.opacity)
             }
         }
@@ -161,7 +162,7 @@ struct PlayerControlsView: View {
     }
 
     private var bottomBar: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             Slider(
                 value: Binding(
                     get: { viewModel.currentTime },
@@ -189,9 +190,7 @@ struct PlayerControlsView: View {
             .foregroundStyle(.white)
             .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 10)
-        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
     }
 
     private var currentRateLabel: String {

@@ -12,12 +12,7 @@ struct PlayerView: View {
             VStack(spacing: viewModel.isFullscreen ? 0 : 16) {
                 canvas
                     .frame(maxWidth: .infinity)
-                    .frame(maxHeight: viewModel.isFullscreen ? .infinity : nil)
-                    // Keep a real ratio in both modes. `.fit` letterboxes safely if
-                    // landscape rotation is delayed/failed — never sideways-broken UI.
-                    .aspectRatio(16 / 10, contentMode: .fit)
-                    .frame(minHeight: viewModel.isFullscreen ? 0 : 180)
-                    .fixedSize(horizontal: false, vertical: !viewModel.isFullscreen)
+                    .modifier(PlayerStageLayout(isFullscreen: viewModel.isFullscreen))
                     .layoutPriority(1)
 
                 if !viewModel.isFullscreen {
@@ -65,6 +60,8 @@ struct PlayerView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
+        // Invisible hook so UIKit re-queries orientation when fullscreen flips.
+        .background(OrientationRefreshHook(isFullscreen: viewModel.isFullscreen))
     }
 
     @ViewBuilder
@@ -110,7 +107,7 @@ struct PlayerView: View {
                         style: .continuous
                     )
                 )
-                .padding(viewModel.isFullscreen ? 0 : 8)
+                .padding(viewModel.isFullscreen ? 0 : 4)
             case .error(let message):
                 ErrorStateView(message: message, retryTitle: "知道了") {
                     if viewModel.playlist.isEmpty {
@@ -122,6 +119,52 @@ struct PlayerView: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Inline keeps 16:10. Fullscreen fills the whole window (after landscape rotation).
+private struct PlayerStageLayout: ViewModifier {
+    let isFullscreen: Bool
+
+    func body(content: Content) -> some View {
+        if isFullscreen {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+        } else {
+            content
+                .aspectRatio(16 / 10, contentMode: .fit)
+                .frame(minHeight: 180)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Ensures AppDelegate orientation mask is re-read when entering/leaving fullscreen.
+private struct OrientationRefreshHook: UIViewControllerRepresentable {
+    let isFullscreen: Bool
+
+    func makeUIViewController(context: Context) -> Controller {
+        Controller()
+    }
+
+    func updateUIViewController(_ controller: Controller, context: Context) {
+        controller.isFullscreen = isFullscreen
+        controller.refreshOrientation()
+    }
+
+    final class Controller: UIViewController {
+        var isFullscreen = false
+
+        override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+            OrientationManager.supportedOrientations
+        }
+
+        override var shouldAutorotate: Bool { true }
+
+        func refreshOrientation() {
+            setNeedsUpdateOfSupportedInterfaceOrientations()
         }
     }
 }
