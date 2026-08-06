@@ -3,6 +3,10 @@ import SwiftUI
 
 struct PlaylistView: View {
     @Bindable var viewModel: PlayerViewModel
+    /// True while a picker is presenting. The system Files picker takes several hundred
+    /// milliseconds to appear, so the button has to acknowledge the tap immediately.
+    var isVideoPickerPending: Bool = false
+    var isAudioPickerPending: Bool = false
     var onImportVideo: () -> Void
     var onImportAudio: () -> Void
 
@@ -58,27 +62,23 @@ struct PlaylistView: View {
 
             // Two direct buttons — Menu/confirmationDialog caused noticeable tap lag.
             Button(action: onImportVideo) {
-                Image(systemName: "video.badge.plus")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 28, height: 28)
-                    .background(Theme.surfaceElevated)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(Theme.border, lineWidth: 1))
+                ImportButtonFace(
+                    systemImage: "video.badge.plus",
+                    isPending: isVideoPickerPending
+                )
             }
             .buttonStyle(.plain)
+            .disabled(isVideoPickerPending)
             .accessibilityLabel("导入视频")
 
             Button(action: onImportAudio) {
-                Image(systemName: "music.note")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 28, height: 28)
-                    .background(Theme.surfaceElevated)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(Theme.border, lineWidth: 1))
+                ImportButtonFace(
+                    systemImage: "music.note",
+                    isPending: isAudioPickerPending
+                )
             }
             .buttonStyle(.plain)
+            .disabled(isAudioPickerPending)
             .accessibilityLabel("导入音频")
 
             Spacer()
@@ -99,6 +99,29 @@ struct PlaylistView: View {
             .accessibilityHint("点击切换播放模式")
             .animation(.easeInOut(duration: 0.18), value: viewModel.playbackMode)
         }
+    }
+}
+
+private struct ImportButtonFace: View {
+    let systemImage: String
+    let isPending: Bool
+
+    var body: some View {
+        ZStack {
+            if isPending {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(Theme.textSecondary)
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+        }
+        .frame(width: 28, height: 28)
+        .background(Theme.surfaceElevated)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Theme.border, lineWidth: 1))
     }
 }
 

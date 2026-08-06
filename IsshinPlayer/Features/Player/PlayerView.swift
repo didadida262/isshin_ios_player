@@ -20,6 +20,8 @@ struct PlayerView: View {
                 if !viewModel.isFullscreen {
                     PlaylistView(
                         viewModel: viewModel,
+                        isVideoPickerPending: showVideoPicker,
+                        isAudioPickerPending: showAudioPicker,
                         onImportVideo: { showVideoPicker = true },
                         onImportAudio: { showAudioPicker = true }
                     )
@@ -62,23 +64,33 @@ struct PlayerView: View {
         .preferredColorScheme(.dark)
         .tint(Theme.selectionGreen)
         .overlay(alignment: .bottom) {
-            if let toast = viewModel.toastMessage, !viewModel.isFullscreen {
-                Text(toast)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 28)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            // Scoped to the overlay: on the root it animated every unrelated state
+            // change in the whole tree, including picker presentation.
+            ZStack {
+                if let toast = viewModel.toastMessage, !viewModel.isFullscreen {
+                    Text(toast)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 28)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
         }
-        .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
         .background(OrientationRefreshHook(isFullscreen: viewModel.isFullscreen))
-        .task { viewModel.start() }
+        .task {
+            viewModel.start()
+            // Off the launch critical path: the first Files-picker presentation
+            // otherwise pays for DocumentManager bring-up on the user's tap.
+            try? await Task.sleep(for: .seconds(2))
+            AudioImportWarmup.warmUp()
+        }
     }
 
     @ViewBuilder
