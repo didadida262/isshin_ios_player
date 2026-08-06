@@ -6,78 +6,156 @@ struct PlaylistView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Text("播放列表")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text("\(viewModel.playlist.count)")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textTertiary)
-
-                Button(action: onImport) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(width: 28, height: 28)
-                        .background(Theme.surfaceElevated)
-                        .clipShape(Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(Theme.border, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Toggle(isOn: $viewModel.autoPlayNext) {
-                    Text("自动连播")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .scaleEffect(0.72)
-                .padding(.trailing, -6)
-                Text("自动连播")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
-            }
+            header
 
             if viewModel.playlist.isEmpty {
                 Text("暂无视频，点击 + 导入")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textTertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.vertical, 8)
             } else {
-                VStack(spacing: 10) {
-                    ForEach(viewModel.playlist) { item in
-                        let isCurrent = viewModel.currentItem?.id == item.id
-                        Button {
-                            viewModel.selectItem(id: item.id)
-                        } label: {
-                            PlaylistCard(item: item, isCurrent: isCurrent)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button(role: .destructive) {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(viewModel.playlist) { item in
+                            let isCurrent = viewModel.currentItem?.id == item.id
+                            SwipeToDeleteRow {
                                 viewModel.removeItem(id: item.id)
-                            } label: {
-                                Label("删除", systemImage: "trash")
+                            } content: {
+                                PlaylistCard(item: item, isCurrent: isCurrent)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        viewModel.selectItem(id: item.id)
+                                    }
                             }
                         }
                     }
                 }
+                .scrollIndicators(.visible)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Theme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1)
         )
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Text("播放列表")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Text("\(viewModel.playlist.count)")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
+
+            Button(action: onImport) {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(width: 28, height: 28)
+                    .background(Theme.surfaceElevated)
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(Theme.border, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Toggle(isOn: $viewModel.autoPlayNext) {
+                Text("自动连播")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .scaleEffect(0.72)
+            .padding(.trailing, -6)
+            Text("自动连播")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
+        }
+    }
+}
+
+/// Custom swipe-to-delete so we don't inherit List margins / global tint side effects.
+private struct SwipeToDeleteRow<Content: View>: View {
+    var onDelete: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    @State private var offset: CGFloat = 0
+    @State private var isOpen = false
+
+    private let actionWidth: CGFloat = 72
+    private let threshold: CGFloat = 40
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    offset = 0
+                    isOpen = false
+                }
+                onDelete()
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: actionWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(Color.red)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("删除")
+
+            content()
+                .offset(x: offset)
+                .gesture(
+                    DragGesture(minimumDistance: 16, coordinateSpace: .local)
+                        .onChanged { value in
+                            let horizontal = value.translation.width
+                            let vertical = value.translation.height
+                            guard abs(horizontal) > abs(vertical) else { return }
+
+                            if isOpen {
+                                offset = min(0, max(-actionWidth, -actionWidth + horizontal))
+                            } else {
+                                offset = min(0, max(-actionWidth, horizontal))
+                            }
+                        }
+                        .onEnded { value in
+                            let horizontal = value.translation.width
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                if isOpen {
+                                    if horizontal > threshold {
+                                        offset = 0
+                                        isOpen = false
+                                    } else {
+                                        offset = -actionWidth
+                                        isOpen = true
+                                    }
+                                } else if horizontal < -threshold {
+                                    offset = -actionWidth
+                                    isOpen = true
+                                } else {
+                                    offset = 0
+                                    isOpen = false
+                                }
+                            }
+                        }
+                )
+        }
+        .frame(maxWidth: .infinity)
+        .clipped()
     }
 }
 

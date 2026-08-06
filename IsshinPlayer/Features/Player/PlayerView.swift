@@ -1,4 +1,3 @@
-import PhotosUI
 import SwiftUI
 
 struct PlayerView: View {
@@ -6,29 +5,33 @@ struct PlayerView: View {
     @State private var showVideoPicker = false
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    canvas
-                    PlaylistView(viewModel: viewModel) {
-                        showVideoPicker = true
-                    }
-                }
-                .padding(16)
+        VStack(spacing: 16) {
+            canvas
+                .frame(maxWidth: .infinity)
+                .layoutPriority(0)
+
+            PlaylistView(viewModel: viewModel) {
+                showVideoPicker = true
             }
-            .background(Theme.background.ignoresSafeArea())
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Theme.background, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .background {
-                VideoPhotosPicker(isPresented: $showVideoPicker) { results in
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .layoutPriority(1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Theme.background.ignoresSafeArea())
+        .sheet(isPresented: $showVideoPicker) {
+            VideoLibraryPickerView(
+                loadedIdentifiers: viewModel.loadedAssetIdentifiers,
+                onCancel: { showVideoPicker = false },
+                onConfirm: { assets in
+                    showVideoPicker = false
                     Task {
-                        await viewModel.importVideos(from: results)
+                        await viewModel.importVideos(from: assets)
                     }
                 }
-                .frame(width: 0, height: 0)
-                .allowsHitTesting(false)
-            }
+            )
         }
         .preferredColorScheme(.dark)
         .tint(Theme.selectionGreen)
@@ -92,7 +95,7 @@ struct PlayerView: View {
                 }
             }
         }
-        .frame(minHeight: 280)
+        .frame(maxWidth: .infinity)
         .aspectRatio(16 / 10, contentMode: .fit)
         .animation(.easeInOut(duration: 0.2), value: viewModel.phase)
     }

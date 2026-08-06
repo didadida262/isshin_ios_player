@@ -1,9 +1,7 @@
 import AVFoundation
 import Foundation
 import Photos
-import PhotosUI
 import SwiftUI
-import UniformTypeIdentifiers
 
 @MainActor
 @Observable
@@ -38,6 +36,11 @@ final class PlayerViewModel {
         return playlist[currentIndex]
     }
 
+    /// Photos asset IDs already present in the playlist (for picker “已加载” state).
+    var loadedAssetIdentifiers: Set<String> {
+        Set(playlist.compactMap(\.assetIdentifier))
+    }
+
     var hasNext: Bool {
         guard let currentIndex else { return false }
         return currentIndex + 1 < playlist.count
@@ -63,28 +66,39 @@ final class PlayerViewModel {
 
     // MARK: - Import
 
-    func importVideos(from results: [PHPickerResult]) async {
-        guard !results.isEmpty else { return }
+    func importVideos(from assets: [PHAsset]) async {
+        guard !assets.isEmpty else { return }
         importGeneration += 1
         let generation = importGeneration
         let hadCurrent = currentItem != nil
+        let alreadyLoaded = loadedAssetIdentifiers
 
         phase = playlist.isEmpty ? .loading : phase
 
         var added: [PlaylistItem] = []
         var failed = 0
 
-        for result in results {
+        for asset in assets {
             guard generation == importGeneration else { return }
+            let assetID = asset.localIdentifier
+            if alreadyLoaded.contains(assetID) { continue }
+
             do {
-                guard let movie = try await Self.resolveMovie(from: result.itemProvider) else {
+                guard let movie = try await Self.exportMovie(from: asset) else {
                     failed += 1
                     continue
                 }
                 let index = playlist.count + added.count + 1
-                let title = Self.displayTitle(for: result, imported: movie, fallbackIndex: index)
-                let duration = await Self.loadDuration(url: movie.url)
-                added.append(PlaylistItem(title: title, fileURL: movie.url, duration: duration))
+                let title = Self.displayTitle(for: asset, imported: movie, fallbackIndex: index)
+                let duration = await Self.loadDuration(url: movie.url) ?? asset.duration
+                added.append(
+                    PlaylistItem(
+                        title: title,
+                        fileURL: movie.url,
+                        duration: duration,
+                        assetIdentifier: assetID
+                    )
+                )
             } catch {
                 failed += 1
             }
@@ -100,29 +114,24 @@ final class PlayerViewModel {
         }
 
         playlist.append(contentsOf: added)
-        if !hadCurrent, let first = added.first ?? playlist.first {
+        if !hadCurrent, let first = added.first {
             enqueueLoad(first, autoPlay: true)
         } else if phase == .loading {
             phase = currentItem == nil ? .empty : .ready
         }
 
         if failed > 0 {
-            print("Import partial failure: \(failed)/\(results.count) skipped")
+            print("Import partial failure: \(failed)/\(assets.count) skipped")
         }
     }
 
     private static func displayTitle(
-        for result: PHPickerResult,
+        for asset: PHAsset,
         imported: ImportedMovie,
         fallbackIndex: Int
     ) -> String {
-        if let photosName = originalFilenameFromPhotos(assetIdentifier: result.assetIdentifier) {
+        if let photosName = originalFilename(for: asset) {
             return stripExtension(photosName)
-        }
-
-        if let suggested = result.itemProvider.suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !suggested.isEmpty {
-            return stripExtension(suggested)
         }
 
         if let importedName = imported.suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -144,10 +153,7 @@ final class PlayerViewModel {
         return "视频 \(fallbackIndex)"
     }
 
-    private static func originalFilenameFromPhotos(assetIdentifier: String?) -> String? {
-        guard let assetIdentifier else { return nil }
-        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
-        guard let asset = assets.firstObject else { return nil }
+    private static func originalFilename(for asset: PHAsset) -> String? {
         let resources = PHAssetResource.assetResources(for: asset)
         if let video = resources.first(where: { $0.type == .video }) {
             return video.originalFilename
@@ -162,7 +168,6 @@ final class PlayerViewModel {
     }
 
     private static func looksLikeGeneratedName(_ name: String) -> Bool {
-        // UUID or simulator placeholder style names
         if name.range(
             of: #"^[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}$"#,
             options: String.CompareOptions.regularExpression
@@ -175,67 +180,81 @@ final class PlayerViewModel {
         return false
     }
 
-    private static func resolveMovie(from provider: NSItemProvider) async throws -> ImportedMovie? {
-        let preferredName = provider.suggestedName
-        let typeIdentifiers = [
-            UTType.movie.identifier,
-            UTType.mpeg4Movie.identifier,
-            UTType.quickTimeMovie.identifier,
-            UTType.avi.identifier,
-            "public.mpeg-2-video",
-            "com.apple.m4v-video"
-        ]
-
-        for typeID in typeIdentifiers where provider.hasItemConformingToTypeIdentifier(typeID) {
-            if let movie = try await loadMovieFile(
-                from: provider,
-                typeIdentifier: typeID,
-                preferredName: preferredName
-            ) {
-                return movie
-            }
-        }
-
-        for typeID in provider.registeredTypeIdentifiers {
-            if let movie = try await loadMovieFile(
-                from: provider,
-                typeIdentifier: typeID,
-                preferredName: preferredName
-            ) {
-                return movie
-            }
-        }
-        return nil
-    }
-
-    private static func loadMovieFile(
-        from provider: NSItemProvider,
-        typeIdentifier: String,
-        preferredName: String?
-    ) async throws -> ImportedMovie? {
+    private static func exportMovie(from asset: PHAsset) async throws -> ImportedMovie? {
         try await withCheckedThrowingContinuation { continuation in
-            provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard let url else {
+            let options = PHVideoRequestOptions()
+            options.isNetworkAccessAllowed = true
+            options.deliveryMode = .highQualityFormat
+
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, info in
+                if let cancelled = info?[PHImageCancelledKey] as? Bool, cancelled {
                     continuation.resume(returning: nil)
                     return
                 }
+                if let error = info?[PHImageErrorKey] as? Error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let avAsset else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
+                let suggested = Self.originalFilename(for: asset)
+
                 do {
                     let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                         .appendingPathComponent("Imports", isDirectory: true)
                     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                    let dest = dir.appendingPathComponent("\(UUID().uuidString)_\(url.lastPathComponent)")
+
+                    if let urlAsset = avAsset as? AVURLAsset {
+                        let sourceURL = urlAsset.url
+                        let dest = dir.appendingPathComponent("\(UUID().uuidString)_\(sourceURL.lastPathComponent)")
+                        if FileManager.default.fileExists(atPath: dest.path) {
+                            try FileManager.default.removeItem(at: dest)
+                        }
+                        try FileManager.default.copyItem(at: sourceURL, to: dest)
+                        continuation.resume(
+                            returning: ImportedMovie(
+                                url: dest,
+                                suggestedName: suggested ?? sourceURL.deletingPathExtension().lastPathComponent
+                            )
+                        )
+                        return
+                    }
+
+                    let dest = dir.appendingPathComponent("\(UUID().uuidString).mp4")
                     if FileManager.default.fileExists(atPath: dest.path) {
                         try FileManager.default.removeItem(at: dest)
                     }
-                    try FileManager.default.copyItem(at: url, to: dest)
-                    let fromProvider = preferredName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let fromFile = url.deletingPathExtension().lastPathComponent
-                    let suggested = (fromProvider?.isEmpty == false ? fromProvider : fromFile)
-                    continuation.resume(returning: ImportedMovie(url: dest, suggestedName: suggested))
+                    guard let session = AVAssetExportSession(
+                        asset: avAsset,
+                        presetName: AVAssetExportPresetHighestQuality
+                    ) else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    session.outputURL = dest
+                    session.outputFileType = .mp4
+                    session.exportAsynchronously {
+                        switch session.status {
+                        case .completed:
+                            continuation.resume(
+                                returning: ImportedMovie(url: dest, suggestedName: suggested)
+                            )
+                        case .cancelled:
+                            continuation.resume(returning: nil)
+                        default:
+                            continuation.resume(
+                                throwing: session.error
+                                    ?? NSError(
+                                        domain: "IsshinPlayer",
+                                        code: -1,
+                                        userInfo: [NSLocalizedDescriptionKey: "视频导出失败"]
+                                    )
+                            )
+                        }
+                    }
                 } catch {
                     continuation.resume(throwing: error)
                 }

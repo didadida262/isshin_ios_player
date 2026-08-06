@@ -5,12 +5,21 @@ struct PlaylistItem: Identifiable, Equatable, Hashable {
     var title: String
     var fileURL: URL
     var duration: TimeInterval?
+    /// Photos library local identifier; used to mark already-imported clips in the picker.
+    var assetIdentifier: String?
 
-    init(id: UUID = UUID(), title: String, fileURL: URL, duration: TimeInterval? = nil) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        fileURL: URL,
+        duration: TimeInterval? = nil,
+        assetIdentifier: String? = nil
+    ) {
         self.id = id
         self.title = title
         self.fileURL = fileURL
         self.duration = duration
+        self.assetIdentifier = assetIdentifier
     }
 }
 
