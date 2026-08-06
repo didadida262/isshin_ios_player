@@ -16,6 +16,7 @@ enum PlaylistStore {
         /// Path relative to the app Documents directory.
         var relativePath: String
         var duration: TimeInterval?
+        var mediaKind: String?
         var assetIdentifier: String?
     }
 
@@ -33,12 +34,14 @@ enum PlaylistStore {
         for record in snapshot.items {
             let url = docs.appendingPathComponent(record.relativePath)
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            let kind = record.mediaKind.flatMap(MediaKind.init(rawValue:)) ?? .infer(from: url)
             items.append(
                 PlaylistItem(
                     id: record.id,
                     title: record.title,
                     fileURL: url,
                     duration: record.duration,
+                    mediaKind: kind,
                     assetIdentifier: record.assetIdentifier
                 )
             )
@@ -60,20 +63,14 @@ enum PlaylistStore {
     static func save(items: [PlaylistItem], currentItemID: UUID?, playbackMode: PlaybackMode) {
         let docs = documentsDirectory
         let records: [Record] = items.compactMap { item in
-            guard let relative = relativePath(for: item.fileURL, documents: docs) else {
-                return Record(
-                    id: item.id,
-                    title: item.title,
-                    relativePath: "Imports/\(item.fileURL.lastPathComponent)",
-                    duration: item.duration,
-                    assetIdentifier: item.assetIdentifier
-                )
-            }
+            let relative = relativePath(for: item.fileURL, documents: docs)
+                ?? "Imports/\(item.fileURL.lastPathComponent)"
             return Record(
                 id: item.id,
                 title: item.title,
                 relativePath: relative,
                 duration: item.duration,
+                mediaKind: item.mediaKind.rawValue,
                 assetIdentifier: item.assetIdentifier
             )
         }

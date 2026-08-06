@@ -1,10 +1,43 @@
 import Foundation
+import UniformTypeIdentifiers
+
+enum MediaKind: String, Codable, Equatable, Hashable {
+    case video
+    case audio
+
+    static func infer(from url: URL) -> MediaKind {
+        let ext = url.pathExtension.lowercased()
+        let audioExtensions: Set<String> = [
+            "mp3", "m4a", "aac", "wav", "caf", "aiff", "aif", "flac", "ogg", "oga", "opus"
+        ]
+        if audioExtensions.contains(ext) { return .audio }
+        if let type = UTType(filenameExtension: ext), type.conforms(to: .audio) {
+            return .audio
+        }
+        return .video
+    }
+
+    var listSystemImage: String {
+        switch self {
+        case .video: return "video"
+        case .audio: return "music.note"
+        }
+    }
+
+    var listSystemImageFilled: String {
+        switch self {
+        case .video: return "video.fill"
+        case .audio: return "music.note"
+        }
+    }
+}
 
 struct PlaylistItem: Identifiable, Equatable, Hashable {
     let id: UUID
     var title: String
     var fileURL: URL
     var duration: TimeInterval?
+    var mediaKind: MediaKind
     /// Photos library local identifier; used to mark already-imported clips in the picker.
     var assetIdentifier: String?
 
@@ -13,12 +46,14 @@ struct PlaylistItem: Identifiable, Equatable, Hashable {
         title: String,
         fileURL: URL,
         duration: TimeInterval? = nil,
+        mediaKind: MediaKind? = nil,
         assetIdentifier: String? = nil
     ) {
         self.id = id
         self.title = title
         self.fileURL = fileURL
         self.duration = duration
+        self.mediaKind = mediaKind ?? .infer(from: fileURL)
         self.assetIdentifier = assetIdentifier
     }
 }

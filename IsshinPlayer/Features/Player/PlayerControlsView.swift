@@ -90,18 +90,20 @@ struct PlayerControlsView: View {
                     .clipShape(Capsule())
             }
 
-            Button {
-                viewModel.startPiP()
-                bumpInteraction()
-            } label: {
-                Image(systemName: viewModel.pipManager.isActive ? "pip.exit" : "pip.enter")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(.ultraThinMaterial.opacity(0.9))
-                    .clipShape(Circle())
+            if viewModel.currentItem?.mediaKind != .audio {
+                Button {
+                    viewModel.startPiP()
+                    bumpInteraction()
+                } label: {
+                    Image(systemName: viewModel.pipManager.isActive ? "pip.exit" : "pip.enter")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                        .background(.ultraThinMaterial.opacity(0.9))
+                        .clipShape(Circle())
+                }
+                .opacity(viewModel.pipManager.isPossible || viewModel.pipManager.isActive ? 1 : 0.7)
             }
-            .opacity(viewModel.pipManager.isPossible || viewModel.pipManager.isActive ? 1 : 0.7)
 
             Button {
                 if isFullscreen {

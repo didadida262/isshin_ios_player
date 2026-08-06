@@ -119,6 +119,7 @@ final class PlayerViewModel {
                         title: title,
                         fileURL: movie.url,
                         duration: duration,
+                        mediaKind: .video,
                         assetIdentifier: assetID
                     )
                 )
@@ -147,6 +148,98 @@ final class PlayerViewModel {
         if failed > 0 {
             print("Import partial failure: \(failed)/\(assets.count) skipped")
         }
+    }
+
+    func importAudio(from urls: [URL]) async {
+        guard !urls.isEmpty else { return }
+        importGeneration += 1
+        let generation = importGeneration
+        let hadCurrent = currentItem != nil
+
+        phase = playlist.isEmpty ? .loading : phase
+
+        var added: [PlaylistItem] = []
+        var failed = 0
+
+        for url in urls {
+            guard generation == importGeneration else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessed { url.stopAccessingSecurityScopedResource() }
+            }
+
+            do {
+                let imported = try Self.copyImportFile(from: url)
+                let index = playlist.count + added.count + 1
+                let title = Self.displayTitle(forAudioURL: url, imported: imported, fallbackIndex: index)
+                let duration = await Self.loadDuration(url: imported.url)
+                added.append(
+                    PlaylistItem(
+                        title: title,
+                        fileURL: imported.url,
+                        duration: duration,
+                        mediaKind: .audio
+                    )
+                )
+            } catch {
+                failed += 1
+            }
+        }
+
+        guard generation == importGeneration else { return }
+
+        if added.isEmpty {
+            if playlist.isEmpty {
+                phase = .error("未能导入音频，请重试")
+            }
+            return
+        }
+
+        playlist.append(contentsOf: added)
+        persistPlaylist()
+        if !hadCurrent, let first = added.first {
+            enqueueLoad(first, autoPlay: false)
+        } else if phase == .loading {
+            phase = currentItem == nil ? .empty : .ready
+        }
+
+        if failed > 0 {
+            print("Audio import partial failure: \(failed)/\(urls.count) skipped")
+        }
+    }
+
+    private static func displayTitle(
+        forAudioURL source: URL,
+        imported: ImportedMovie,
+        fallbackIndex: Int
+    ) -> String {
+        let candidates = [
+            source.deletingPathExtension().lastPathComponent,
+            imported.suggestedName,
+            imported.url.deletingPathExtension().lastPathComponent
+        ]
+        for name in candidates {
+            guard let name else { continue }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !looksLikeGeneratedName(trimmed) else { continue }
+            return stripExtension(trimmed)
+        }
+        return "音频 \(fallbackIndex)"
+    }
+
+    private static func copyImportFile(from sourceURL: URL) throws -> ImportedMovie {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Imports", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent("\(UUID().uuidString)_\(sourceURL.lastPathComponent)")
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try FileManager.default.removeItem(at: dest)
+        }
+        try FileManager.default.copyItem(at: sourceURL, to: dest)
+        return ImportedMovie(
+            url: dest,
+            suggestedName: sourceURL.deletingPathExtension().lastPathComponent
+        )
     }
 
     private static func displayTitle(
@@ -598,6 +691,8 @@ final class PlayerViewModel {
                     self.currentTime = seconds
                 }
                 self.isPlaying = self.player.rate > 0
+                // Keep Control Center / lock screen scrubber in sync while backgrounded.
+                self.nowPlaying.publishProgressIfNeeded()
             }
         }
 

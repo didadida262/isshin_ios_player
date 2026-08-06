@@ -1,8 +1,22 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PlayerView: View {
     @State private var viewModel = PlayerViewModel()
+    @State private var showImportMenu = false
     @State private var showVideoPicker = false
+    @State private var showAudioImporter = false
+
+    private var audioContentTypes: [UTType] {
+        var types: [UTType] = [.audio, .mp3, .mpeg4Audio, .wav, .aiff]
+        if let flac = UTType(filenameExtension: "flac") {
+            types.append(flac)
+        }
+        if let caf = UTType(filenameExtension: "caf") {
+            types.append(caf)
+        }
+        return types
+    }
 
     var body: some View {
         ZStack {
@@ -17,7 +31,7 @@ struct PlayerView: View {
 
                 if !viewModel.isFullscreen {
                     PlaylistView(viewModel: viewModel) {
-                        showVideoPicker = true
+                        showImportMenu = true
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .layoutPriority(0)
@@ -30,6 +44,15 @@ struct PlayerView: View {
         }
         .statusBarHidden(viewModel.isFullscreen)
         .persistentSystemOverlays(viewModel.isFullscreen ? .hidden : .automatic)
+        .confirmationDialog("导入到播放列表", isPresented: $showImportMenu, titleVisibility: .visible) {
+            Button("从相册导入视频") {
+                showVideoPicker = true
+            }
+            Button("从文件导入音频") {
+                showAudioImporter = true
+            }
+            Button("取消", role: .cancel) {}
+        }
         .sheet(isPresented: $showVideoPicker) {
             VideoLibraryPickerView(
                 loadedIdentifiers: viewModel.loadedAssetIdentifiers,
@@ -41,6 +64,20 @@ struct PlayerView: View {
                     }
                 }
             )
+        }
+        .fileImporter(
+            isPresented: $showAudioImporter,
+            allowedContentTypes: audioContentTypes,
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                Task {
+                    await viewModel.importAudio(from: urls)
+                }
+            case .failure(let error):
+                viewModel.showToast("导入失败：\(error.localizedDescription)")
+            }
         }
         .preferredColorScheme(.dark)
         .tint(Theme.selectionGreen)
@@ -60,7 +97,6 @@ struct PlayerView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
-        // Invisible hook so UIKit re-queries orientation when fullscreen flips.
         .background(OrientationRefreshHook(isFullscreen: viewModel.isFullscreen))
     }
 
@@ -81,8 +117,8 @@ struct PlayerView: View {
             switch viewModel.phase {
             case .empty:
                 EmptyStateView(
-                    title: "还没有视频",
-                    message: "从相册导入视频，支持多选加入播放列表",
+                    title: "还没有内容",
+                    message: "可从相册导入视频，或从文件导入音频",
                     actionTitle: nil,
                     action: nil
                 )
@@ -91,10 +127,17 @@ struct PlayerView: View {
                     .padding(12)
             case .ready:
                 ZStack {
-                    PlayerLayerView(player: viewModel.player) { layer in
-                        viewModel.pipManager.attach(playerLayer: layer)
+                    if viewModel.currentItem?.mediaKind == .audio {
+                        AudioStageView(
+                            title: viewModel.currentItem?.title ?? "音频",
+                            isPlaying: viewModel.isPlaying
+                        )
+                    } else {
+                        PlayerLayerView(player: viewModel.player) { layer in
+                            viewModel.pipManager.attach(playerLayer: layer)
+                        }
+                        .id("isshin-main-player-layer")
                     }
-                    .id("isshin-main-player-layer")
 
                     PlayerControlsView(
                         viewModel: viewModel,

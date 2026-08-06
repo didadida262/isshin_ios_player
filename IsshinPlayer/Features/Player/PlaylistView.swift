@@ -9,7 +9,7 @@ struct PlaylistView: View {
             header
 
             if viewModel.playlist.isEmpty {
-                Text("暂无视频，点击 + 导入")
+                Text("暂无内容，点击 + 导入视频或音频")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -192,7 +192,7 @@ private struct PlaylistCard: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(isCurrent ? Theme.brandBlue.opacity(0.18) : Theme.surfaceElevated)
                     .frame(width: 40, height: 40)
-                Image(systemName: isCurrent ? "video.fill" : "video")
+                Image(systemName: isCurrent ? item.mediaKind.listSystemImageFilled : item.mediaKind.listSystemImage)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(isCurrent ? Theme.brandBlue : Theme.textTertiary)
             }
