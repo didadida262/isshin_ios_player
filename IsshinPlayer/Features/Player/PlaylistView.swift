@@ -74,7 +74,8 @@ struct PlaylistView: View {
                 viewModel.cyclePlaybackMode()
             } label: {
                 Image(systemName: viewModel.playbackMode.systemImage)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 17, weight: .regular))
+                    .symbolRenderingMode(.monochrome)
                     .foregroundStyle(Theme.textSecondary)
                     .frame(width: 28, height: 28)
                     .contentShape(Rectangle())

@@ -558,8 +558,6 @@ final class PlayerViewModel {
             }
         case .repeatOne:
             rewindToStart(andPlay: true)
-        case .pauseAtEnd:
-            rewindToStart(andPlay: false)
         }
     }
 
