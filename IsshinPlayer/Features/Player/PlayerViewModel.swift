@@ -517,8 +517,21 @@ final class PlayerViewModel {
         isPlaying = false
         if autoPlayNext, hasNext {
             playNext()
-        } else {
-            nowPlaying.updateNowPlaying()
+            return
+        }
+
+        // Stay on the finished item, but rewind so the UI doesn't look "stuck at end"
+        // and Control Center / Now Playing doesn't keep reporting completion.
+        let endItem = player.currentItem
+        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+            guard finished else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                // Ignore stale completions from a replaced item.
+                guard self.player.currentItem === endItem else { return }
+                self.currentTime = 0
+                self.nowPlaying.updateNowPlaying()
+            }
         }
     }
 

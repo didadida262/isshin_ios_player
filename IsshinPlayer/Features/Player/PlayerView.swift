@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct PlayerView: View {
     @State private var viewModel = PlayerViewModel()
@@ -12,16 +13,20 @@ struct PlayerView: View {
             VStack(spacing: viewModel.isFullscreen ? 0 : 16) {
                 canvas
                     .frame(maxWidth: .infinity)
-                    .frame(maxHeight: viewModel.isFullscreen ? .infinity : nil)
-                    .layoutPriority(viewModel.isFullscreen ? 1 : 0)
+                    // Always keep a concrete aspect ratio (never nil) so the player
+                    // cannot be compressed to ~0 height by the playlist below.
+                    .aspectRatio(canvasAspectRatio, contentMode: .fit)
+                    .frame(minHeight: viewModel.isFullscreen ? 0 : 180)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                    .ignoresSafeArea(viewModel.isFullscreen ? .all : [])
 
                 if !viewModel.isFullscreen {
                     PlaylistView(viewModel: viewModel) {
                         showVideoPicker = true
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .layoutPriority(1)
-                    .transition(.opacity)
+                    .layoutPriority(0)
                 }
             }
             .padding(.horizontal, viewModel.isFullscreen ? 0 : 16)
@@ -62,6 +67,26 @@ struct PlayerView: View {
         .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
     }
 
+    /// Inline stays 16:10. Fullscreen tracks the current screen ratio so the
+    /// same modifiers remain applied (avoids layout collapse / layer teardown).
+    private var canvasAspectRatio: CGFloat {
+        if viewModel.isFullscreen {
+            let size = currentSceneSize
+            let w = max(size.width, 1)
+            let h = max(size.height, 1)
+            return w / h
+        }
+        return 16 / 10
+    }
+
+    private var currentSceneSize: CGSize {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        return scene?.screen.bounds.size ?? CGSize(width: 16, height: 10)
+    }
+
     @ViewBuilder
     private var canvas: some View {
         ZStack {
@@ -88,7 +113,6 @@ struct PlayerView: View {
                 SkeletonBlock(height: 240)
                     .padding(12)
             case .ready:
-                // Keep a single PlayerLayerView identity across inline ↔ fullscreen.
                 ZStack {
                     PlayerLayerView(player: viewModel.player) { layer in
                         viewModel.pipManager.attach(playerLayer: layer)
@@ -119,8 +143,5 @@ struct PlayerView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: viewModel.isFullscreen ? .infinity : nil)
-        .aspectRatio(viewModel.isFullscreen ? nil : 16 / 10, contentMode: .fit)
-        .animation(nil, value: viewModel.phase)
     }
 }

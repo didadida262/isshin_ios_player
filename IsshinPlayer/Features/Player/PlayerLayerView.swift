@@ -48,11 +48,12 @@ struct PlayerLayerView: UIViewRepresentable {
 
         func emit(_ layer: AVPlayerLayer) {
             let size = layer.bounds.size
-            guard size.width > 1, size.height > 1 else { return }
-            // Avoid spamming attach on every tiny layout pass
-            if abs(size.width - lastSize.width) < 0.5, abs(size.height - lastSize.height) < 0.5,
+            // Ignore collapsed / transitional layouts (e.g. during orientation flip).
+            guard size.width > 8, size.height > 8 else { return }
+
+            if abs(size.width - lastSize.width) < 0.5,
+               abs(size.height - lastSize.height) < 0.5,
                lastSize != .zero {
-                onLayerReady?(layer)
                 return
             }
             lastSize = size
