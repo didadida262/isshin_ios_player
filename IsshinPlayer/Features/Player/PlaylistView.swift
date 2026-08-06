@@ -86,7 +86,7 @@ struct PlaylistView: View {
     }
 }
 
-/// Custom swipe-to-delete so we don't inherit List margins / global tint side effects.
+/// Swipe left to reveal a compact delete action (hidden when closed).
 private struct SwipeToDeleteRow<Content: View>: View {
     var onDelete: () -> Void
     @ViewBuilder var content: () -> Content
@@ -94,68 +94,75 @@ private struct SwipeToDeleteRow<Content: View>: View {
     @State private var offset: CGFloat = 0
     @State private var isOpen = false
 
-    private let actionWidth: CGFloat = 72
-    private let threshold: CGFloat = 40
+    private let actionWidth: CGFloat = 56
+    private let threshold: CGFloat = 36
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            Button {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                    offset = 0
-                    isOpen = false
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(alignment: .trailing) {
+                Button {
+                    close()
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: actionWidth)
+                        .frame(maxHeight: .infinity)
+                        .background(Color.red)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                onDelete()
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: actionWidth)
-                    .frame(maxHeight: .infinity)
-                    .background(Color.red)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .buttonStyle(.plain)
+                .accessibilityLabel("删除")
+                // Park just past the trailing edge; left-swipe reveals it.
+                .offset(x: actionWidth)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("删除")
+            .offset(x: offset)
+            .gesture(swipeGesture)
+            .clipped()
+    }
 
-            content()
-                .offset(x: offset)
-                .gesture(
-                    DragGesture(minimumDistance: 16, coordinateSpace: .local)
-                        .onChanged { value in
-                            let horizontal = value.translation.width
-                            let vertical = value.translation.height
-                            guard abs(horizontal) > abs(vertical) else { return }
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 20, coordinateSpace: .local)
+            .onChanged { value in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                guard abs(horizontal) > abs(vertical) * 1.2 else { return }
 
-                            if isOpen {
-                                offset = min(0, max(-actionWidth, -actionWidth + horizontal))
-                            } else {
-                                offset = min(0, max(-actionWidth, horizontal))
-                            }
+                if isOpen {
+                    offset = min(0, max(-actionWidth, -actionWidth + horizontal))
+                } else {
+                    offset = min(0, max(-actionWidth, horizontal))
+                }
+            }
+            .onEnded { value in
+                let horizontal = value.translation.width
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    if isOpen {
+                        if horizontal > threshold {
+                            offset = 0
+                            isOpen = false
+                        } else {
+                            offset = -actionWidth
+                            isOpen = true
                         }
-                        .onEnded { value in
-                            let horizontal = value.translation.width
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                                if isOpen {
-                                    if horizontal > threshold {
-                                        offset = 0
-                                        isOpen = false
-                                    } else {
-                                        offset = -actionWidth
-                                        isOpen = true
-                                    }
-                                } else if horizontal < -threshold {
-                                    offset = -actionWidth
-                                    isOpen = true
-                                } else {
-                                    offset = 0
-                                    isOpen = false
-                                }
-                            }
-                        }
-                )
+                    } else if horizontal < -threshold {
+                        offset = -actionWidth
+                        isOpen = true
+                    } else {
+                        offset = 0
+                        isOpen = false
+                    }
+                }
+            }
+    }
+
+    private func close() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            offset = 0
+            isOpen = false
         }
-        .frame(maxWidth: .infinity)
-        .clipped()
     }
 }
 
@@ -206,7 +213,7 @@ private struct PlaylistCard: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isCurrent ? Theme.brandBlue.opacity(0.08) : Theme.background.opacity(0.55))
+                .fill(isCurrent ? Theme.brandBlue.opacity(0.16) : Theme.surfaceElevated)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)

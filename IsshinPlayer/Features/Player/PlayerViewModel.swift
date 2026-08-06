@@ -115,7 +115,7 @@ final class PlayerViewModel {
 
         playlist.append(contentsOf: added)
         if !hadCurrent, let first = added.first {
-            enqueueLoad(first, autoPlay: true)
+            enqueueLoad(first, autoPlay: false)
         } else if phase == .loading {
             phase = currentItem == nil ? .empty : .ready
         }
