@@ -29,7 +29,14 @@ struct PlayerControlsView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: visible)
-        .onAppear { scheduleAutoHide() }
+        .onAppear {
+            visible = true
+            scheduleAutoHide()
+        }
+        .onChange(of: isFullscreen) { _, _ in
+            visible = true
+            scheduleAutoHide()
+        }
         .onChange(of: viewModel.isPlaying) { _, playing in
             if playing {
                 scheduleAutoHide()

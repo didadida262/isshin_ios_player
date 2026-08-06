@@ -1,6 +1,7 @@
 import UIKit
 
 enum OrientationManager {
+    /// Default: portrait for the main browsing UI.
     private(set) static var supportedOrientations: UIInterfaceOrientationMask = .portrait
 
     static func lockPortrait() {
@@ -8,8 +9,10 @@ enum OrientationManager {
         apply(.portrait)
     }
 
-    static func lockLandscape() {
-        supportedOrientations = .landscape
+    /// Prefer landscape, but keep portrait allowed so a failed rotation
+    /// cannot trap the UI in an unsupported-orientation limbo.
+    static func preferLandscapeFullscreen() {
+        supportedOrientations = .allButUpsideDown
         apply(.landscape)
     }
 

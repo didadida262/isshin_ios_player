@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 struct PlayerView: View {
     @State private var viewModel = PlayerViewModel()
@@ -13,13 +12,13 @@ struct PlayerView: View {
             VStack(spacing: viewModel.isFullscreen ? 0 : 16) {
                 canvas
                     .frame(maxWidth: .infinity)
-                    // Always keep a concrete aspect ratio (never nil) so the player
-                    // cannot be compressed to ~0 height by the playlist below.
-                    .aspectRatio(canvasAspectRatio, contentMode: .fit)
+                    .frame(maxHeight: viewModel.isFullscreen ? .infinity : nil)
+                    // Keep a real ratio in both modes. `.fit` letterboxes safely if
+                    // landscape rotation is delayed/failed — never sideways-broken UI.
+                    .aspectRatio(16 / 10, contentMode: .fit)
                     .frame(minHeight: viewModel.isFullscreen ? 0 : 180)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .fixedSize(horizontal: false, vertical: !viewModel.isFullscreen)
                     .layoutPriority(1)
-                    .ignoresSafeArea(viewModel.isFullscreen ? .all : [])
 
                 if !viewModel.isFullscreen {
                     PlaylistView(viewModel: viewModel) {
@@ -32,6 +31,7 @@ struct PlayerView: View {
             .padding(.horizontal, viewModel.isFullscreen ? 0 : 16)
             .padding(.bottom, viewModel.isFullscreen ? 0 : 16)
             .padding(.top, viewModel.isFullscreen ? 0 : 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .statusBarHidden(viewModel.isFullscreen)
         .persistentSystemOverlays(viewModel.isFullscreen ? .hidden : .automatic)
@@ -67,38 +67,18 @@ struct PlayerView: View {
         .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
     }
 
-    /// Inline stays 16:10. Fullscreen tracks the current screen ratio so the
-    /// same modifiers remain applied (avoids layout collapse / layer teardown).
-    private var canvasAspectRatio: CGFloat {
-        if viewModel.isFullscreen {
-            let size = currentSceneSize
-            let w = max(size.width, 1)
-            let h = max(size.height, 1)
-            return w / h
-        }
-        return 16 / 10
-    }
-
-    private var currentSceneSize: CGSize {
-        let scene = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive })
-            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        return scene?.screen.bounds.size ?? CGSize(width: 16, height: 10)
-    }
-
     @ViewBuilder
     private var canvas: some View {
         ZStack {
-            if !viewModel.isFullscreen {
+            if viewModel.isFullscreen {
+                Color.black
+            } else {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Theme.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .stroke(Theme.border, lineWidth: 1)
                     )
-            } else {
-                Color.black
             }
 
             switch viewModel.phase {

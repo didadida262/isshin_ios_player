@@ -381,13 +381,12 @@ final class PlayerViewModel {
 
     func enterFullscreen() {
         guard phase == .ready else { return }
-        // Avoid layout animation fighting the system rotation (causes a visible flash).
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             isFullscreen = true
         }
-        OrientationManager.lockLandscape()
+        OrientationManager.preferLandscapeFullscreen()
         if !isPlaying {
             play()
         }
