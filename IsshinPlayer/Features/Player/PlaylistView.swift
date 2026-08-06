@@ -70,18 +70,20 @@ struct PlaylistView: View {
 
             Spacer()
 
-            Toggle(isOn: $viewModel.autoPlayNext) {
-                Text("自动连播")
-                    .font(.system(size: 12))
+            Button {
+                viewModel.cyclePlaybackMode()
+            } label: {
+                Image(systemName: viewModel.playbackMode.systemImage)
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+                    .contentTransition(.symbolEffect(.replace))
             }
-            .toggleStyle(.switch)
-            .labelsHidden()
-            .scaleEffect(0.72)
-            .padding(.trailing, -6)
-            Text("自动连播")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
+            .buttonStyle(.plain)
+            .accessibilityLabel(viewModel.playbackMode.title)
+            .accessibilityHint("点击切换播放模式")
+            .animation(.easeInOut(duration: 0.18), value: viewModel.playbackMode)
         }
     }
 }

@@ -51,3 +51,37 @@ enum PlaybackRate: Float, CaseIterable, Identifiable {
         }
     }
 }
+
+/// What happens when the current video finishes.
+enum PlaybackMode: String, CaseIterable, Identifiable {
+    /// Play the next item; stop (rewound) if this is the last.
+    case sequential
+    /// Restart the current item automatically.
+    case repeatOne
+    /// Rewind and stay paused on the current item.
+    case pauseAtEnd
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .sequential: return "顺序播放"
+        case .repeatOne: return "单集重播"
+        case .pauseAtEnd: return "播完暂停"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .sequential: return "forward.end.alt.fill"
+        case .repeatOne: return "repeat.1"
+        case .pauseAtEnd: return "stop.circle.fill"
+        }
+    }
+
+    var next: PlaybackMode {
+        let all = Self.allCases
+        let index = all.firstIndex(of: self) ?? 0
+        return all[(index + 1) % all.count]
+    }
+}
