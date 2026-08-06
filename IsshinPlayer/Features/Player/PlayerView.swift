@@ -2,21 +2,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct PlayerView: View {
-    @State private var viewModel = PlayerViewModel()
-    @State private var showImportMenu = false
+    let viewModel: PlayerViewModel
     @State private var showVideoPicker = false
-    @State private var showAudioImporter = false
-
-    private var audioContentTypes: [UTType] {
-        var types: [UTType] = [.audio, .mp3, .mpeg4Audio, .wav, .aiff]
-        if let flac = UTType(filenameExtension: "flac") {
-            types.append(flac)
-        }
-        if let caf = UTType(filenameExtension: "caf") {
-            types.append(caf)
-        }
-        return types
-    }
+    @State private var showAudioPicker = false
 
     var body: some View {
         ZStack {
@@ -30,9 +18,11 @@ struct PlayerView: View {
                     .layoutPriority(1)
 
                 if !viewModel.isFullscreen {
-                    PlaylistView(viewModel: viewModel) {
-                        showImportMenu = true
-                    }
+                    PlaylistView(
+                        viewModel: viewModel,
+                        onImportVideo: { showVideoPicker = true },
+                        onImportAudio: { showAudioPicker = true }
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .layoutPriority(0)
                 }
@@ -44,15 +34,6 @@ struct PlayerView: View {
         }
         .statusBarHidden(viewModel.isFullscreen)
         .persistentSystemOverlays(viewModel.isFullscreen ? .hidden : .automatic)
-        .confirmationDialog("导入到播放列表", isPresented: $showImportMenu, titleVisibility: .visible) {
-            Button("从相册导入视频") {
-                showVideoPicker = true
-            }
-            Button("从文件导入音频") {
-                showAudioImporter = true
-            }
-            Button("取消", role: .cancel) {}
-        }
         .sheet(isPresented: $showVideoPicker) {
             VideoLibraryPickerView(
                 loadedIdentifiers: viewModel.loadedAssetIdentifiers,
@@ -66,17 +47,16 @@ struct PlayerView: View {
             )
         }
         .fileImporter(
-            isPresented: $showAudioImporter,
-            allowedContentTypes: audioContentTypes,
+            isPresented: $showAudioPicker,
+            allowedContentTypes: [.audio, .mp3, .mpeg4Audio, .wav, .aiff],
             allowsMultipleSelection: true
         ) { result in
             switch result {
             case .success(let urls):
-                Task {
-                    await viewModel.importAudio(from: urls)
-                }
+                Task { await viewModel.importAudio(from: urls) }
             case .failure(let error):
-                viewModel.showToast("导入失败：\(error.localizedDescription)")
+                print("Audio fileImporter failed: \(error.localizedDescription)")
+                viewModel.showToast("无法打开文件选择器")
             }
         }
         .preferredColorScheme(.dark)
@@ -98,6 +78,7 @@ struct PlayerView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
         .background(OrientationRefreshHook(isFullscreen: viewModel.isFullscreen))
+        .task { viewModel.start() }
     }
 
     @ViewBuilder
@@ -118,13 +99,25 @@ struct PlayerView: View {
             case .empty:
                 EmptyStateView(
                     title: "还没有内容",
-                    message: "可从相册导入视频，或从文件导入音频",
+                    message: "点上方视频/音符按钮导入",
                     actionTitle: nil,
                     action: nil
                 )
             case .loading:
-                SkeletonBlock(height: 240)
-                    .padding(12)
+                VStack(spacing: 14) {
+                    ProgressView()
+                        .tint(Theme.brandBlue)
+                    Text("加载中…")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textSecondary)
+                    Button("取消") {
+                        viewModel.cancelLoading()
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.brandBlue)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(12)
             case .ready:
                 ZStack {
                     if viewModel.currentItem?.mediaKind == .audio {
@@ -132,17 +125,19 @@ struct PlayerView: View {
                             title: viewModel.currentItem?.title ?? "音频",
                             isPlaying: viewModel.isPlaying
                         )
+                        .allowsHitTesting(false)
                     } else {
                         PlayerLayerView(player: viewModel.player) { layer in
                             viewModel.pipManager.attach(playerLayer: layer)
                         }
-                        .id("isshin-main-player-layer")
+                        .allowsHitTesting(false)
                     }
 
                     PlayerControlsView(
                         viewModel: viewModel,
                         isFullscreen: viewModel.isFullscreen
                     )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .clipShape(
                     RoundedRectangle(
@@ -152,13 +147,14 @@ struct PlayerView: View {
                 )
                 .padding(viewModel.isFullscreen ? 0 : 4)
             case .error(let message):
-                ErrorStateView(message: message, retryTitle: "知道了") {
-                    if viewModel.playlist.isEmpty {
-                        viewModel.phase = .empty
-                    } else if viewModel.currentItem != nil {
-                        viewModel.phase = .ready
+                ErrorStateView(
+                    message: message,
+                    retryTitle: viewModel.currentItem == nil ? "知道了" : "重试"
+                ) {
+                    if viewModel.currentItem == nil {
+                        viewModel.dismissError()
                     } else {
-                        viewModel.phase = .empty
+                        viewModel.retryCurrent()
                     }
                 }
             }
@@ -166,7 +162,6 @@ struct PlayerView: View {
     }
 }
 
-/// Inline keeps 16:10. Fullscreen fills the whole window (after landscape rotation).
 private struct PlayerStageLayout: ViewModifier {
     let isFullscreen: Bool
 
@@ -178,13 +173,12 @@ private struct PlayerStageLayout: ViewModifier {
         } else {
             content
                 .aspectRatio(16 / 10, contentMode: .fit)
+                .frame(maxWidth: .infinity)
                 .frame(minHeight: 180)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
-/// Ensures AppDelegate orientation mask is re-read when entering/leaving fullscreen.
 private struct OrientationRefreshHook: UIViewControllerRepresentable {
     let isFullscreen: Bool
 
@@ -193,6 +187,9 @@ private struct OrientationRefreshHook: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: Controller, context: Context) {
+        // Only on a real change: `setNeedsUpdateOfSupportedInterfaceOrientations()`
+        // triggers a geometry pass, which would feed back into this update.
+        guard controller.isFullscreen != isFullscreen else { return }
         controller.isFullscreen = isFullscreen
         controller.refreshOrientation()
     }

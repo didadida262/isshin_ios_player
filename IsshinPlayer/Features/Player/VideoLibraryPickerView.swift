@@ -28,8 +28,13 @@ struct VideoLibraryPickerView: View {
                 case .denied, .restricted:
                     permissionDenied
                 case .notDetermined:
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("正在请求相册权限…")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 @unknown default:
                     permissionDenied
                 }
@@ -44,7 +49,7 @@ struct VideoLibraryPickerView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: confirm) {
-                        Image(uiImage: Self.pureWhiteCheckOnGreenImage())
+                        Image(uiImage: Self.confirmCheckImage)
                             .resizable()
                             .frame(width: 30, height: 30)
                     }
@@ -72,8 +77,13 @@ struct VideoLibraryPickerView: View {
                 .padding(.vertical, 10)
 
             if isLoadingLibrary {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("正在读取相册…")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if assets.isEmpty {
                 Text("相册中没有视频")
                     .font(.system(size: 14))
@@ -141,7 +151,13 @@ struct VideoLibraryPickerView: View {
     }
 
     private func requestAndLoad() async {
-        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        // Only prompt when undecided. `requestAuthorization` on an already-granted
+        // library still round-trips through Photos/TCC and was measured taking ~50 s,
+        // which parked this sheet on a blank spinner.
+        var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined {
+            status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        }
         authorization = status
         guard status == .authorized || status == .limited else {
             isLoadingLibrary = false
@@ -174,7 +190,7 @@ struct VideoLibraryPickerView: View {
         isLoadingLibrary = false
     }
 
-    private static func pureWhiteCheckOnGreenImage() -> UIImage {
+    private static let confirmCheckImage: UIImage = {
         let side: CGFloat = 30
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
         return renderer.image { _ in
@@ -190,7 +206,7 @@ struct VideoLibraryPickerView: View {
             check.addLine(to: CGPoint(x: side * 0.73, y: side * 0.33))
             check.stroke()
         }.withRenderingMode(.alwaysOriginal)
-    }
+    }()
 }
 
 private struct VideoAssetCell: View {
@@ -201,59 +217,58 @@ private struct VideoAssetCell: View {
     @State private var thumbnail: UIImage?
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                Group {
+        ZStack {
+            // Deliberately no GeometryReader: one per LazyVGrid cell costs a layout
+            // pass per cell and makes scrolling a large library stutter badly.
+            Rectangle()
+                .fill(Theme.surfaceElevated)
+                .overlay {
                     if let thumbnail {
                         Image(uiImage: thumbnail)
                             .resizable()
                             .scaledToFill()
-                    } else {
-                        Rectangle().fill(Theme.surfaceElevated)
                     }
                 }
-                .frame(width: geo.size.width, height: geo.size.height)
                 .clipped()
 
-                if isLoaded {
-                    Color.black.opacity(0.48)
-                    VStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(Theme.selectionGreen)
-                        Text("已加载")
-                            .font(.system(size: 11, weight: .semibold))
+            if isLoaded {
+                Color.black.opacity(0.48)
+                VStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(Theme.selectionGreen)
+                    Text("已加载")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            Text(formatDuration(asset.duration))
+                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.black.opacity(0.55))
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .padding(6)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if !isLoaded {
+                ZStack {
+                    Circle()
+                        .fill(isSelected ? Theme.selectionGreen : Color.black.opacity(0.28))
+                        .frame(width: 24, height: 24)
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.95), lineWidth: 1.5)
+                        .frame(width: 24, height: 24)
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.white)
                     }
                 }
-            }
-            .overlay(alignment: .bottomLeading) {
-                Text(formatDuration(asset.duration))
-                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Color.black.opacity(0.55))
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                    .padding(6)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if !isLoaded {
-                    ZStack {
-                        Circle()
-                            .fill(isSelected ? Theme.selectionGreen : Color.black.opacity(0.28))
-                            .frame(width: 24, height: 24)
-                        Circle()
-                            .strokeBorder(Color.white.opacity(0.95), lineWidth: 1.5)
-                            .frame(width: 24, height: 24)
-                        if isSelected {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                    .padding(8)
-                }
+                .padding(8)
             }
         }
         .clipped()
@@ -268,53 +283,47 @@ private struct VideoAssetCell: View {
     }
 
     private static func requestThumbnail(for asset: PHAsset) async -> UIImage? {
-        await withCheckedContinuation { continuation in
-            let options = PHImageRequestOptions()
-            options.deliveryMode = .opportunistic
-            options.resizeMode = .fast
-            options.isNetworkAccessAllowed = true
+        final class RequestBox: @unchecked Sendable {
+            var id: PHImageRequestID?
+            var resumed = false
+            let lock = NSLock()
 
-            final class ResumeBox: @unchecked Sendable {
-                var resumed = false
-                let lock = NSLock()
-                func finish(_ image: UIImage?, resume: (UIImage?) -> Void) {
-                    lock.lock()
-                    defer { lock.unlock() }
-                    guard !resumed else { return }
-                    resumed = true
-                    resume(image)
+            func finish(_ image: UIImage?, _ resume: (UIImage?) -> Void) {
+                lock.lock()
+                defer { lock.unlock() }
+                guard !resumed else { return }
+                resumed = true
+                resume(image)
+            }
+        }
+        let box = RequestBox()
+
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<UIImage?, Never>) in
+                let options = PHImageRequestOptions()
+                options.deliveryMode = .fastFormat
+                options.resizeMode = .fast
+                // Thumbnails must never trigger an iCloud download while scrolling.
+                options.isNetworkAccessAllowed = false
+
+                box.id = PHImageManager.default().requestImage(
+                    for: asset,
+                    targetSize: CGSize(width: 180, height: 180),
+                    contentMode: .aspectFill,
+                    options: options
+                ) { image, _ in
+                    // First delivered frame wins; a degraded thumbnail beats a blank cell.
+                    box.finish(image) { continuation.resume(returning: $0) }
                 }
             }
-            let box = ResumeBox()
-            let target = CGSize(width: 300, height: 300)
-
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: target,
-                contentMode: .aspectFill,
-                options: options
-            ) { image, info in
-                let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
-                if cancelled {
-                    box.finish(nil) { continuation.resume(returning: $0) }
-                    return
-                }
-                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                // Prefer final image; if only degraded arrives and then nothing, keep it.
-                if let image, !degraded {
-                    box.finish(image) { continuation.resume(returning: $0) }
-                } else if let image {
-                    // Keep degraded as fallback; don't resume yet unless error/no more.
-                    let error = info?[PHImageErrorKey] as? Error
-                    if error != nil {
-                        box.finish(image) { continuation.resume(returning: $0) }
-                    } else {
-                        // Resume with degraded so UI isn't blank; final may still improve.
-                        box.finish(image) { continuation.resume(returning: $0) }
-                    }
-                } else {
-                    box.finish(nil) { continuation.resume(returning: $0) }
-                }
+        } onCancel: {
+            box.lock.lock()
+            let id = box.id
+            box.lock.unlock()
+            // Photos invokes the result handler with PHImageCancelledKey, which is
+            // what resumes the continuation — don't mark it finished here.
+            if let id {
+                PHImageManager.default().cancelImageRequest(id)
             }
         }
     }

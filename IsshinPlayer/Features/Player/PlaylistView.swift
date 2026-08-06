@@ -1,15 +1,17 @@
+import Photos
 import SwiftUI
 
 struct PlaylistView: View {
     @Bindable var viewModel: PlayerViewModel
-    var onImport: () -> Void
+    var onImportVideo: () -> Void
+    var onImportAudio: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
             if viewModel.playlist.isEmpty {
-                Text("暂无内容，点击 + 导入视频或音频")
+                Text("暂无内容，点视频/音符按钮导入")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -54,19 +56,30 @@ struct PlaylistView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.textTertiary)
 
-            Button(action: onImport) {
-                Image(systemName: "plus")
+            // Two direct buttons — Menu/confirmationDialog caused noticeable tap lag.
+            Button(action: onImportVideo) {
+                Image(systemName: "video.badge.plus")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
                     .frame(width: 28, height: 28)
                     .background(Theme.surfaceElevated)
                     .clipShape(Circle())
-                    .overlay(
-                        Circle()
-                            .stroke(Theme.border, lineWidth: 1)
-                    )
+                    .overlay(Circle().stroke(Theme.border, lineWidth: 1))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("导入视频")
+
+            Button(action: onImportAudio) {
+                Image(systemName: "music.note")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(width: 28, height: 28)
+                    .background(Theme.surfaceElevated)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Theme.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("导入音频")
 
             Spacer()
 
@@ -148,7 +161,6 @@ private struct SwipeToDeleteRow<Content: View>: View {
                 } else {
                     next = min(0, max(-revealWidth, horizontal))
                 }
-                // Interactive follow — slight smoothing via animation.
                 withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86, blendDuration: 0.12)) {
                     offset = next
                 }

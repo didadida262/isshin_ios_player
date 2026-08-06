@@ -15,8 +15,8 @@ final class PictureInPictureManager: NSObject, AVPictureInPictureControllerDeleg
     func attach(playerLayer: AVPlayerLayer) {
         guard playerLayer.bounds.width > 1, playerLayer.bounds.height > 1 else { return }
 
+        // Same layer already bound — do nothing. Re-creating PiP thrash stalls AVPlayer.
         if boundLayer === playerLayer, controller != nil {
-            refreshPossible()
             return
         }
 
@@ -28,13 +28,7 @@ final class PictureInPictureManager: NSObject, AVPictureInPictureControllerDeleg
             return
         }
 
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            lastErrorMessage = error.localizedDescription
-        }
-
+        // Don't reconfigure AVAudioSession here — PlayerViewModel owns the session.
         guard let pip = AVPictureInPictureController(playerLayer: playerLayer) else {
             isPossible = false
             lastErrorMessage = "无法创建画中画控制器"

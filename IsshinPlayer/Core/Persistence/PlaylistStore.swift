@@ -1,8 +1,13 @@
 import Foundation
 
-/// Persists playlist metadata under Documents. Video files already live in Documents/Imports.
+/// Persists playlist metadata under Documents. Media files live in Documents/Imports.
 enum PlaylistStore {
     private static let fileName = "playlist.json"
+    /// Bump when the on-disk format or restore semantics change in a breaking way.
+    /// Triggers a one-time wipe of playlist metadata + Imports so stale data
+    /// from buggy builds cannot brick a fresh install path.
+    private static let schemaVersion = 4
+    private static let schemaVersionKey = "isshin.playlistStore.schemaVersion"
 
     private struct Snapshot: Codable {
         var items: [Record]
@@ -13,7 +18,6 @@ enum PlaylistStore {
     private struct Record: Codable {
         var id: UUID
         var title: String
-        /// Path relative to the app Documents directory.
         var relativePath: String
         var duration: TimeInterval?
         var mediaKind: String?
@@ -21,6 +25,8 @@ enum PlaylistStore {
     }
 
     static func load() -> (items: [PlaylistItem], currentItemID: UUID?, playbackMode: PlaybackMode) {
+        migrateSchemaIfNeeded()
+
         guard let data = try? Data(contentsOf: storeURL),
               let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data)
         else {
@@ -33,7 +39,18 @@ enum PlaylistStore {
 
         for record in snapshot.items {
             let url = docs.appendingPathComponent(record.relativePath)
-            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue
+            else { continue }
+
+            // Skip empty / clearly broken leftovers from failed imports.
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let size = attrs[.size] as? NSNumber,
+               size.intValue < 64 {
+                continue
+            }
+
             let kind = record.mediaKind.flatMap(MediaKind.init(rawValue:)) ?? .infer(from: url)
             items.append(
                 PlaylistItem(
@@ -52,7 +69,6 @@ enum PlaylistStore {
             items.contains(where: { $0.id == id }) ? id : items.first?.id
         }
 
-        // Rewrite if some files were missing, so the store stays clean.
         if items.count != snapshot.items.count {
             save(items: items, currentItemID: currentID, playbackMode: mode)
         }
@@ -87,6 +103,21 @@ enum PlaylistStore {
         } catch {
             print("PlaylistStore save failed: \(error)")
         }
+    }
+
+    /// One-time cleanup after schema bumps (and for recovering from corrupt local state).
+    private static func migrateSchemaIfNeeded() {
+        let current = UserDefaults.standard.integer(forKey: schemaVersionKey)
+        guard current < schemaVersion else { return }
+
+        let fm = FileManager.default
+        try? fm.removeItem(at: storeURL)
+        let imports = documentsDirectory.appendingPathComponent("Imports", isDirectory: true)
+        try? fm.removeItem(at: imports)
+        try? fm.createDirectory(at: imports, withIntermediateDirectories: true)
+
+        UserDefaults.standard.set(schemaVersion, forKey: schemaVersionKey)
+        print("PlaylistStore: wiped local media for schema \(current) → \(schemaVersion)")
     }
 
     private static var documentsDirectory: URL {

@@ -1,6 +1,8 @@
 import SwiftUI
 
-/// Foreground in-player overlay controls (not lock-screen / Control Center chrome).
+/// Foreground in-player overlay controls.
+/// Important: do NOT put a full-screen `onTapGesture` under the buttons —
+/// SwiftUI will often steal the play/pause taps.
 struct PlayerControlsView: View {
     @Bindable var viewModel: PlayerViewModel
     var isFullscreen: Bool = false
@@ -8,35 +10,39 @@ struct PlayerControlsView: View {
     @State private var hideTask: Task<Void, Never>?
 
     var body: some View {
-        ZStack {
-            // Transparent hit target only — no dim/scrim over the video.
+        VStack(spacing: 0) {
+            if visible {
+                topBar
+                    .transition(.opacity)
+            }
+
+            // Tapping the middle toggles chrome; buttons sit outside this region.
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture { toggleVisible() }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if visible {
-                VStack(spacing: 0) {
-                    topBar
-                    Spacer(minLength: 0)
+                VStack(spacing: 8) {
                     centerTransport
-                    Spacer(minLength: 0)
                     bottomBar
                 }
-                .padding(.horizontal, isFullscreen ? 20 : 8)
-                .padding(.vertical, isFullscreen ? 12 : 8)
-                .safeAreaPadding(.top, isFullscreen ? 4 : 0)
-                .safeAreaPadding(.bottom, isFullscreen ? 4 : 0)
                 .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: visible)
+        .padding(.horizontal, isFullscreen ? 20 : 8)
+        .padding(.vertical, isFullscreen ? 12 : 8)
+        .safeAreaPadding(.top, isFullscreen ? 4 : 0)
+        .safeAreaPadding(.bottom, isFullscreen ? 4 : 0)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.15), value: visible)
         .onAppear {
             visible = true
-            scheduleAutoHide()
+            hideTask?.cancel()
         }
         .onChange(of: isFullscreen) { _, _ in
             visible = true
-            scheduleAutoHide()
+            hideTask?.cancel()
         }
         .onChange(of: viewModel.isPlaying) { _, playing in
             if playing {
@@ -53,6 +59,10 @@ struct PlayerControlsView: View {
             } else if viewModel.isPlaying {
                 scheduleAutoHide()
             }
+        }
+        .onChange(of: viewModel.currentItem?.id) { _, _ in
+            visible = true
+            hideTask?.cancel()
         }
     }
 
@@ -102,7 +112,6 @@ struct PlayerControlsView: View {
                         .background(.ultraThinMaterial.opacity(0.9))
                         .clipShape(Circle())
                 }
-                .opacity(viewModel.pipManager.isPossible || viewModel.pipManager.isActive ? 1 : 0.7)
             }
 
             Button {
@@ -134,6 +143,8 @@ struct PlayerControlsView: View {
             } label: {
                 Image(systemName: "backward.fill")
                     .font(.system(size: 20, weight: .semibold))
+                    .frame(width: 48, height: 48)
+                    .contentShape(Rectangle())
             }
             .disabled(!viewModel.hasPrevious && viewModel.currentTime <= 3)
             .opacity((!viewModel.hasPrevious && viewModel.currentTime <= 3) ? 0.35 : 1)
@@ -144,9 +155,10 @@ struct PlayerControlsView: View {
             } label: {
                 Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 28, weight: .bold))
-                    .frame(width: 64, height: 64)
+                    .frame(width: 72, height: 72)
                     .background(Circle().fill(.ultraThinMaterial))
                     .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                    .contentShape(Circle())
             }
 
             Button {
@@ -155,6 +167,8 @@ struct PlayerControlsView: View {
             } label: {
                 Image(systemName: "forward.fill")
                     .font(.system(size: 20, weight: .semibold))
+                    .frame(width: 48, height: 48)
+                    .contentShape(Rectangle())
             }
             .disabled(!viewModel.hasNext)
             .opacity(viewModel.hasNext ? 1 : 0.35)
@@ -167,7 +181,7 @@ struct PlayerControlsView: View {
         VStack(spacing: 6) {
             Slider(
                 value: Binding(
-                    get: { viewModel.currentTime },
+                    get: { min(viewModel.currentTime, max(viewModel.duration, 0.1)) },
                     set: { viewModel.updateSeekPreview($0) }
                 ),
                 in: 0...(max(viewModel.duration, 0.1)),

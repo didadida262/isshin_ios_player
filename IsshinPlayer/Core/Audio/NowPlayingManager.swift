@@ -6,11 +6,35 @@ import UIKit
 final class NowPlayingManager {
     private weak var viewModel: PlayerViewModel?
     private var lastPublishedSecond: Int = -1
+    private var cachedArtwork: MPMediaItemArtwork?
+    private var didBind = false
+    private var lastCommandState: CommandState?
+
+    /// Writing `MPRemoteCommand.isEnabled` notifies the system that the app's remote
+    /// control capabilities changed, which invalidates the SwiftUI scene. Writing it
+    /// unconditionally therefore creates an update → scene-invalidate → update loop,
+    /// so the last published values are cached and only real changes are pushed.
+    private struct CommandState: Equatable {
+        var hasItems: Bool
+        var canNext: Bool
+        var canPrevious: Bool
+    }
 
     func bind(to viewModel: PlayerViewModel) {
+        guard !didBind else { return }
+        didBind = true
         self.viewModel = viewModel
         UIApplication.shared.beginReceivingRemoteControlEvents()
         setupRemoteCommands()
+        // Build artwork once off the main actor so launch/play stay responsive.
+        Task.detached(priority: .utility) {
+            let artwork = NowPlayingManager.makeArtwork()
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.cachedArtwork = artwork
+                self.updateNowPlaying()
+            }
+        }
         refreshCommandAvailability()
     }
 
@@ -33,7 +57,7 @@ final class NowPlayingManager {
             info[MPMediaItemPropertyPlaybackDuration] = duration
         }
 
-        if let artwork = brandArtwork() {
+        if let artwork = cachedArtwork {
             info[MPMediaItemPropertyArtwork] = artwork
         }
 
@@ -42,41 +66,51 @@ final class NowPlayingManager {
         refreshCommandAvailability()
     }
 
-    /// Push elapsed time while playing so the lock-screen scrubber keeps moving.
-    func publishProgressIfNeeded(force: Bool = false) {
+    /// Lightweight lock-screen progress update — never reloads artwork.
+    func publishProgressIfNeeded() {
         guard let viewModel, viewModel.isPlaying else { return }
         let second = Int(viewModel.currentTime)
-        guard force || second != lastPublishedSecond else { return }
-        updateNowPlaying()
+        guard second != lastPublishedSecond else { return }
+        lastPublishedSecond = second
+
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = max(0, viewModel.currentTime)
+        info[MPNowPlayingInfoPropertyPlaybackRate] = Double(viewModel.playbackRate)
+        if viewModel.duration.isFinite, viewModel.duration > 0 {
+            info[MPMediaItemPropertyPlaybackDuration] = viewModel.duration
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     func clear() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         lastPublishedSecond = -1
+        lastCommandState = nil
         refreshCommandAvailability()
     }
 
     private func refreshCommandAvailability() {
-        let center = MPRemoteCommandCenter.shared()
-        let hasItems = !(viewModel?.playlist.isEmpty ?? true)
-        let hasNext = viewModel?.hasNext ?? false
-        let hasPrevious = viewModel?.hasPrevious ?? false
-        let currentTime = viewModel?.currentTime ?? 0
+        let count = viewModel?.playlist.count ?? 0
+        let state = CommandState(
+            hasItems: count > 0,
+            canNext: count > 0 && ((viewModel?.hasNext ?? false) || count > 1),
+            canPrevious: count > 0 && ((viewModel?.hasPrevious ?? false) || (viewModel?.currentTime ?? 0) > 0.5)
+        )
+        guard state != lastCommandState else { return }
+        lastCommandState = state
 
-        center.playCommand.isEnabled = hasItems
-        center.pauseCommand.isEnabled = hasItems
-        center.togglePlayPauseCommand.isEnabled = hasItems
-        // Always allow next/prev when there is something loaded — prev seeks to start,
-        // next no-ops gracefully if this is the last item.
-        center.nextTrackCommand.isEnabled = hasItems && (hasNext || (viewModel?.playlist.count ?? 0) > 1)
-        center.previousTrackCommand.isEnabled = hasItems && (hasPrevious || currentTime > 0.5)
-        center.changePlaybackPositionCommand.isEnabled = hasItems
+        let center = MPRemoteCommandCenter.shared()
+        center.playCommand.isEnabled = state.hasItems
+        center.pauseCommand.isEnabled = state.hasItems
+        center.togglePlayPauseCommand.isEnabled = state.hasItems
+        center.nextTrackCommand.isEnabled = state.canNext
+        center.previousTrackCommand.isEnabled = state.canPrevious
+        center.changePlaybackPositionCommand.isEnabled = state.hasItems
     }
 
     private func setupRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
 
-        // Avoid duplicate handlers if bind is ever called again.
         [
             center.playCommand,
             center.pauseCommand,
@@ -87,25 +121,41 @@ final class NowPlayingManager {
         ].forEach { $0.removeTarget(nil) }
 
         center.playCommand.addTarget { [weak self] _ in
-            self?.performOnMain { $0.play() } ?? .commandFailed
+            Task { @MainActor in
+                self?.viewModel?.play()
+                self?.updateNowPlaying()
+            }
+            return .success
         }
         center.pauseCommand.addTarget { [weak self] _ in
-            self?.performOnMain { $0.pause() } ?? .commandFailed
+            Task { @MainActor in
+                self?.viewModel?.pause()
+                self?.updateNowPlaying()
+            }
+            return .success
         }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in
-            self?.performOnMain { $0.togglePlayPause() } ?? .commandFailed
+            Task { @MainActor in
+                self?.viewModel?.togglePlayPause()
+                self?.updateNowPlaying()
+            }
+            return .success
         }
         center.nextTrackCommand.addTarget { [weak self] _ in
-            self?.performOnMain { vm in
+            Task { @MainActor in
+                guard let vm = self?.viewModel else { return }
                 if vm.hasNext {
                     vm.playNext()
                 } else if vm.playlist.count > 1, let first = vm.playlist.first {
                     vm.selectItem(id: first.id)
                 }
-            } ?? .commandFailed
+                self?.updateNowPlaying()
+            }
+            return .success
         }
         center.previousTrackCommand.addTarget { [weak self] _ in
-            self?.performOnMain { vm in
+            Task { @MainActor in
+                guard let vm = self?.viewModel else { return }
                 if vm.currentTime > 3 {
                     vm.seek(to: 0)
                 } else if vm.hasPrevious {
@@ -115,51 +165,38 @@ final class NowPlayingManager {
                 } else {
                     vm.seek(to: 0)
                 }
-            } ?? .commandFailed
+                self?.updateNowPlaying()
+            }
+            return .success
         }
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else {
                 return .commandFailed
             }
-            return self?.performOnMain { $0.seek(to: event.positionTime) } ?? .commandFailed
-        }
-    }
-
-    /// Remote callbacks arrive off the main actor; hop over and run synchronously.
-    private func performOnMain(_ work: @escaping @MainActor (PlayerViewModel) -> Void) -> MPRemoteCommandHandlerStatus {
-        guard viewModel != nil else { return .commandFailed }
-
-        if Thread.isMainThread {
-            if let vm = viewModel {
-                MainActor.assumeIsolated {
-                    work(vm)
-                    updateNowPlaying()
-                }
+            Task { @MainActor in
+                self?.viewModel?.seek(to: event.positionTime)
+                self?.updateNowPlaying()
             }
             return .success
         }
-
-        var status: MPRemoteCommandHandlerStatus = .commandFailed
-        DispatchQueue.main.sync {
-            if let vm = viewModel {
-                work(vm)
-                updateNowPlaying()
-                status = .success
-            }
-        }
-        return status
     }
 
-    private func brandArtwork() -> MPMediaItemArtwork? {
-        let image = UIImage(named: "BrandLogo")
-            ?? UIImage(named: "IsshinLogo")
-            ?? placeholderArtworkImage()
-        let size = image.size
+    nonisolated private static func makeArtwork() -> MPMediaItemArtwork {
+        let side: CGFloat = 200
+        let size = CGSize(width: side, height: side)
+        let image: UIImage
+        if let source = UIImage(named: "BrandLogo") ?? UIImage(named: "IsshinLogo") {
+            let renderer = UIGraphicsImageRenderer(size: size)
+            image = renderer.image { _ in
+                source.draw(in: CGRect(origin: .zero, size: size))
+            }
+        } else {
+            image = placeholderArtworkImage(size: size)
+        }
         return MPMediaItemArtwork(boundsSize: size) { _ in image }
     }
 
-    private func placeholderArtworkImage() -> UIImage {
-        let size = CGSize(width: 200, height: 200)
+    nonisolated private static func placeholderArtworkImage(size: CGSize) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
             UIColor(white: 0.12, alpha: 1).setFill()

@@ -14,6 +14,7 @@ struct PlayerLayerView: UIViewRepresentable {
         view.playerLayer.player = player
         view.playerLayer.videoGravity = .resizeAspect
         view.backgroundColor = .black
+        view.isUserInteractionEnabled = false
         let coordinator = context.coordinator
         view.onLayout = { layer in
             coordinator.emit(layer)
@@ -23,24 +24,22 @@ struct PlayerLayerView: UIViewRepresentable {
 
     func updateUIView(_ uiView: PlayerUIView, context: Context) {
         context.coordinator.onLayerReady = onLayerReady
-        // Keep the same AVPlayer attached — never bounce player to nil during layout updates.
         if uiView.playerLayer.player !== player {
             uiView.playerLayer.player = player
         }
         uiView.playerLayer.videoGravity = .resizeAspect
-        uiView.backgroundColor = .black
+        uiView.isUserInteractionEnabled = false
+        // Do not re-emit from updateUIView — that thrashes PiP attach and can stall playback.
         let coordinator = context.coordinator
         uiView.onLayout = { layer in
             coordinator.emit(layer)
-        }
-        if uiView.bounds.width > 1 {
-            coordinator.emit(uiView.playerLayer)
         }
     }
 
     final class Coordinator {
         var onLayerReady: ((AVPlayerLayer) -> Void)?
         private var lastSize: CGSize = .zero
+        private var didEmitOnce = false
 
         init(onLayerReady: ((AVPlayerLayer) -> Void)?) {
             self.onLayerReady = onLayerReady
@@ -48,15 +47,15 @@ struct PlayerLayerView: UIViewRepresentable {
 
         func emit(_ layer: AVPlayerLayer) {
             let size = layer.bounds.size
-            // Ignore collapsed / transitional layouts (e.g. during orientation flip).
             guard size.width > 8, size.height > 8 else { return }
 
-            if abs(size.width - lastSize.width) < 0.5,
-               abs(size.height - lastSize.height) < 0.5,
-               lastSize != .zero {
+            if didEmitOnce,
+               abs(size.width - lastSize.width) < 0.5,
+               abs(size.height - lastSize.height) < 0.5 {
                 return
             }
             lastSize = size
+            didEmitOnce = true
             onLayerReady?(layer)
         }
     }
