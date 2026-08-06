@@ -1,12 +1,23 @@
 <p align="center">
-  <img src="logo_isshin_agent.png" alt="Isshin" width="220" />
+  <img src="logo_isshin_readme.png" alt="Isshin Player" width="120" />
 </p>
 
-# Isshin Player
+<h1 align="center">Isshin Player</h1>
 
-A minimal iOS video player for personal use. Import videos from the Photos library, manage a playlist, and play with standard controls — including playback speed, Picture-in-Picture, and background audio.
+<p align="center">
+  A minimal iOS video player for personal use.<br/>
+  Import from Photos · playlist · PiP · background audio
+</p>
 
-**Stack:** SwiftUI · AVFoundation · PhotosUI · iOS 17+
+<p align="center">
+  <code>SwiftUI</code>
+  ·
+  <code>AVFoundation</code>
+  ·
+  <code>PhotosUI</code>
+  ·
+  <code>iOS 17+</code>
+</p>
 
 ---
 
@@ -43,9 +54,10 @@ Keep the Simulator open between runs; do not quit it every time. Use **⌘R** to
 | Import from Photos | Multi-select videos into a playlist |
 | Playback | Play / pause, scrubbable progress |
 | Speed | 0.5x – 2x (persists across track changes) |
-| Playlist | Switch, delete (context menu), auto-advance |
+| Playlist | Switch, delete (swipe), auto-advance |
 | Picture-in-Picture | When the system allows it (often limited on Simulator — use a real device) |
 | Background audio | Continues on lock screen / Home; Control Center remote commands |
+| Fullscreen | Landscape fullscreen playback |
 | UI | Fixed dark theme, in-player overlay controls |
 
 ---
@@ -58,7 +70,8 @@ IsshinPlayer/
 ├── Core/
 │   ├── Theme/           # Dark palette
 │   ├── Audio/           # Session + Now Playing / remote commands
-│   └── PiP/             # Picture-in-Picture
+│   ├── PiP/             # Picture-in-Picture
+│   └── Orientation/     # Fullscreen landscape lock
 ├── Features/Player/     # Player UI, view model, playlist, import
 ├── DesignSystem/        # Empty / loading / error / brand logo
 ├── Assets.xcassets/
