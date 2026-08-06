@@ -58,11 +58,33 @@ final class PlayerViewModel {
         nowPlaying.bind(to: self)
         observePlayer()
         observeInterruptions()
+        restorePersistedState()
     }
 
     deinit {
         // Avoid touching MainActor-isolated members from nonisolated deinit.
         // Observers are cleaned when replacing items / app teardown via explicit calls.
+    }
+
+    private func restorePersistedState() {
+        let restored = PlaylistStore.load()
+        playbackMode = restored.playbackMode
+        playlist = restored.items
+        guard let firstID = restored.currentItemID ?? playlist.first?.id,
+              let item = playlist.first(where: { $0.id == firstID }) ?? playlist.first
+        else {
+            phase = .empty
+            return
+        }
+        enqueueLoad(item, autoPlay: false)
+    }
+
+    private func persistPlaylist() {
+        PlaylistStore.save(
+            items: playlist,
+            currentItemID: currentItem?.id,
+            playbackMode: playbackMode
+        )
     }
 
     // MARK: - Import
@@ -115,6 +137,7 @@ final class PlayerViewModel {
         }
 
         playlist.append(contentsOf: added)
+        persistPlaylist()
         if !hadCurrent, let first = added.first {
             enqueueLoad(first, autoPlay: false)
         } else if phase == .loading {
@@ -269,6 +292,7 @@ final class PlayerViewModel {
         guard let index = playlist.firstIndex(where: { $0.id == id }) else { return }
         guard index != currentIndex else { return }
         enqueueLoad(playlist[index], autoPlay: true)
+        persistPlaylist()
     }
 
     func removeItem(id: UUID) {
@@ -278,6 +302,7 @@ final class PlayerViewModel {
         playlist.remove(at: index)
 
         try? FileManager.default.removeItem(at: fileURL)
+        persistPlaylist()
 
         if playlist.isEmpty {
             loadTask?.cancel()
@@ -291,8 +316,10 @@ final class PlayerViewModel {
         if removingCurrent {
             let nextIndex = min(index, playlist.count - 1)
             enqueueLoad(playlist[nextIndex], autoPlay: true)
+            persistPlaylist()
         } else if let currentIndex, index < currentIndex {
             self.currentIndex = currentIndex - 1
+            persistPlaylist()
         }
     }
 
@@ -341,6 +368,7 @@ final class PlayerViewModel {
 
     func cyclePlaybackMode() {
         playbackMode = playbackMode.next
+        persistPlaylist()
         showToast(playbackMode.title)
     }
 
@@ -458,6 +486,7 @@ final class PlayerViewModel {
             phase = .ready
             nowPlaying.updateNowPlaying()
             installEndObserver(for: playerItem)
+            persistPlaylist()
             if autoPlay {
                 play()
             }
