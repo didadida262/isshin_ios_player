@@ -3,6 +3,7 @@ import SwiftUI
 /// Foreground in-player overlay controls (not lock-screen / Control Center chrome).
 struct PlayerControlsView: View {
     @Bindable var viewModel: PlayerViewModel
+    var isFullscreen: Bool = false
     @State private var visible = true
     @State private var hideTask: Task<Void, Never>?
 
@@ -22,6 +23,8 @@ struct PlayerControlsView: View {
                     bottomBar
                 }
                 .padding(12)
+                .padding(.top, isFullscreen ? 8 : 0)
+                .padding(.bottom, isFullscreen ? 8 : 0)
                 .transition(.opacity)
             }
         }
@@ -46,14 +49,14 @@ struct PlayerControlsView: View {
     }
 
     private var topBar: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(viewModel.currentItem?.title ?? "Isshin")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.55), radius: 2, y: 1)
                 .lineLimit(1)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             Menu {
                 ForEach(PlaybackRate.allCases) { rate in
@@ -91,6 +94,25 @@ struct PlayerControlsView: View {
                     .clipShape(Circle())
             }
             .opacity(viewModel.pipManager.isPossible || viewModel.pipManager.isActive ? 1 : 0.7)
+
+            Button {
+                if isFullscreen {
+                    viewModel.exitFullscreen()
+                } else {
+                    viewModel.enterFullscreen()
+                }
+                bumpInteraction()
+            } label: {
+                Image(systemName: isFullscreen
+                      ? "arrow.down.right.and.arrow.up.left"
+                      : "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(.ultraThinMaterial.opacity(0.9))
+                    .clipShape(Circle())
+            }
+            .accessibilityLabel(isFullscreen ? "退出全屏" : "全屏播放")
         }
     }
 

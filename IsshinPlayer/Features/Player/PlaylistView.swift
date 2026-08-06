@@ -86,7 +86,7 @@ struct PlaylistView: View {
     }
 }
 
-/// Swipe left to reveal a compact delete action (hidden when closed).
+/// Swipe left to reveal a small circular delete control.
 private struct SwipeToDeleteRow<Content: View>: View {
     var onDelete: () -> Void
     @ViewBuilder var content: () -> Content
@@ -94,61 +94,74 @@ private struct SwipeToDeleteRow<Content: View>: View {
     @State private var offset: CGFloat = 0
     @State private var isOpen = false
 
-    private let actionWidth: CGFloat = 56
-    private let threshold: CGFloat = 36
+    private let revealWidth: CGFloat = 48
+    private let buttonSize: CGFloat = 34
+    private let threshold: CGFloat = 28
+
+    private var progress: CGFloat {
+        min(1, max(0, -offset / revealWidth))
+    }
 
     var body: some View {
-        content()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(alignment: .trailing) {
-                Button {
-                    close()
-                    onDelete()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: actionWidth)
-                        .frame(maxHeight: .infinity)
-                        .background(Color.red)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("删除")
-                // Park just past the trailing edge; left-swipe reveals it.
-                .offset(x: actionWidth)
+        ZStack(alignment: .trailing) {
+            Button {
+                close()
+                onDelete()
+            } label: {
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: buttonSize, height: buttonSize)
+                    .background(Circle().fill(Color.red))
+                    .shadow(color: Color.red.opacity(0.35 * progress), radius: 6, y: 1)
             }
-            .offset(x: offset)
-            .gesture(swipeGesture)
-            .clipped()
+            .buttonStyle(.plain)
+            .accessibilityLabel("删除")
+            .opacity(progress)
+            .scaleEffect(0.72 + 0.28 * progress)
+            .offset(x: (1 - progress) * 10)
+            .padding(.trailing, 7)
+            .allowsHitTesting(isOpen)
+
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .offset(x: offset)
+                .gesture(swipeGesture)
+        }
+        .frame(maxWidth: .infinity)
+        .clipped()
     }
 
     private var swipeGesture: some Gesture {
-        DragGesture(minimumDistance: 20, coordinateSpace: .local)
+        DragGesture(minimumDistance: 16, coordinateSpace: .local)
             .onChanged { value in
                 let horizontal = value.translation.width
                 let vertical = value.translation.height
-                guard abs(horizontal) > abs(vertical) * 1.2 else { return }
+                guard abs(horizontal) > abs(vertical) * 1.15 else { return }
 
+                let next: CGFloat
                 if isOpen {
-                    offset = min(0, max(-actionWidth, -actionWidth + horizontal))
+                    next = min(0, max(-revealWidth, -revealWidth + horizontal))
                 } else {
-                    offset = min(0, max(-actionWidth, horizontal))
+                    next = min(0, max(-revealWidth, horizontal))
+                }
+                // Interactive follow — slight smoothing via animation.
+                withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86, blendDuration: 0.12)) {
+                    offset = next
                 }
             }
             .onEnded { value in
-                let horizontal = value.translation.width
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                    if isOpen {
-                        if horizontal > threshold {
-                            offset = 0
-                            isOpen = false
-                        } else {
-                            offset = -actionWidth
-                            isOpen = true
-                        }
-                    } else if horizontal < -threshold {
-                        offset = -actionWidth
+                let horizontal = value.predictedEndTranslation.width
+                let shouldOpen: Bool
+                if isOpen {
+                    shouldOpen = horizontal < revealWidth * 0.45
+                } else {
+                    shouldOpen = horizontal < -threshold
+                }
+
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.78, blendDuration: 0.15)) {
+                    if shouldOpen {
+                        offset = -revealWidth
                         isOpen = true
                     } else {
                         offset = 0
@@ -159,7 +172,7 @@ private struct SwipeToDeleteRow<Content: View>: View {
     }
 
     private func close() {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
             offset = 0
             isOpen = false
         }

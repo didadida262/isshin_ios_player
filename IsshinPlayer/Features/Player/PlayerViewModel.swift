@@ -17,6 +17,7 @@ final class PlayerViewModel {
     var playbackRate: Float = PlaybackRate.x1.rawValue
     var autoPlayNext = true
     var toastMessage: String?
+    var isFullscreen = false
 
     let player = AVPlayer()
     let pipManager = PictureInPictureManager()
@@ -376,6 +377,29 @@ final class PlayerViewModel {
         if let message = pipManager.start() {
             showToast(message)
         }
+    }
+
+    func enterFullscreen() {
+        guard phase == .ready else { return }
+        // Avoid layout animation fighting the system rotation (causes a visible flash).
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isFullscreen = true
+        }
+        OrientationManager.lockLandscape()
+        if !isPlaying {
+            play()
+        }
+    }
+
+    func exitFullscreen() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isFullscreen = false
+        }
+        OrientationManager.lockPortrait()
     }
 
     func showToast(_ message: String) {

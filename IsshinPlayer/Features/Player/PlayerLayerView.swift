@@ -23,9 +23,12 @@ struct PlayerLayerView: UIViewRepresentable {
 
     func updateUIView(_ uiView: PlayerUIView, context: Context) {
         context.coordinator.onLayerReady = onLayerReady
+        // Keep the same AVPlayer attached — never bounce player to nil during layout updates.
         if uiView.playerLayer.player !== player {
             uiView.playerLayer.player = player
         }
+        uiView.playerLayer.videoGravity = .resizeAspect
+        uiView.backgroundColor = .black
         let coordinator = context.coordinator
         uiView.onLayout = { layer in
             coordinator.emit(layer)

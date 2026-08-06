@@ -5,22 +5,31 @@ struct PlayerView: View {
     @State private var showVideoPicker = false
 
     var body: some View {
-        VStack(spacing: 16) {
-            canvas
-                .frame(maxWidth: .infinity)
-                .layoutPriority(0)
+        ZStack {
+            (viewModel.isFullscreen ? Color.black : Theme.background)
+                .ignoresSafeArea()
 
-            PlaylistView(viewModel: viewModel) {
-                showVideoPicker = true
+            VStack(spacing: viewModel.isFullscreen ? 0 : 16) {
+                canvas
+                    .frame(maxWidth: .infinity)
+                    .frame(maxHeight: viewModel.isFullscreen ? .infinity : nil)
+                    .layoutPriority(viewModel.isFullscreen ? 1 : 0)
+
+                if !viewModel.isFullscreen {
+                    PlaylistView(viewModel: viewModel) {
+                        showVideoPicker = true
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .layoutPriority(1)
+                    .transition(.opacity)
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .layoutPriority(1)
+            .padding(.horizontal, viewModel.isFullscreen ? 0 : 16)
+            .padding(.bottom, viewModel.isFullscreen ? 0 : 16)
+            .padding(.top, viewModel.isFullscreen ? 0 : 8)
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-        .padding(.top, 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Theme.background.ignoresSafeArea())
+        .statusBarHidden(viewModel.isFullscreen)
+        .persistentSystemOverlays(viewModel.isFullscreen ? .hidden : .automatic)
         .sheet(isPresented: $showVideoPicker) {
             VideoLibraryPickerView(
                 loadedIdentifiers: viewModel.loadedAssetIdentifiers,
@@ -36,7 +45,7 @@ struct PlayerView: View {
         .preferredColorScheme(.dark)
         .tint(Theme.selectionGreen)
         .overlay(alignment: .bottom) {
-            if let toast = viewModel.toastMessage {
+            if let toast = viewModel.toastMessage, !viewModel.isFullscreen {
                 Text(toast)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white)
@@ -56,12 +65,16 @@ struct PlayerView: View {
     @ViewBuilder
     private var canvas: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Theme.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Theme.border, lineWidth: 1)
-                )
+            if !viewModel.isFullscreen {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Theme.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Theme.border, lineWidth: 1)
+                    )
+            } else {
+                Color.black
+            }
 
             switch viewModel.phase {
             case .empty:
@@ -75,14 +88,25 @@ struct PlayerView: View {
                 SkeletonBlock(height: 240)
                     .padding(12)
             case .ready:
+                // Keep a single PlayerLayerView identity across inline ↔ fullscreen.
                 ZStack {
                     PlayerLayerView(player: viewModel.player) { layer in
                         viewModel.pipManager.attach(playerLayer: layer)
                     }
-                    PlayerControlsView(viewModel: viewModel)
+                    .id("isshin-main-player-layer")
+
+                    PlayerControlsView(
+                        viewModel: viewModel,
+                        isFullscreen: viewModel.isFullscreen
+                    )
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .padding(8)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: viewModel.isFullscreen ? 0 : 14,
+                        style: .continuous
+                    )
+                )
+                .padding(viewModel.isFullscreen ? 0 : 8)
             case .error(let message):
                 ErrorStateView(message: message, retryTitle: "知道了") {
                     if viewModel.playlist.isEmpty {
@@ -95,8 +119,8 @@ struct PlayerView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(16 / 10, contentMode: .fit)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.phase)
+        .frame(maxWidth: .infinity, maxHeight: viewModel.isFullscreen ? .infinity : nil)
+        .aspectRatio(viewModel.isFullscreen ? nil : 16 / 10, contentMode: .fit)
+        .animation(nil, value: viewModel.phase)
     }
 }
