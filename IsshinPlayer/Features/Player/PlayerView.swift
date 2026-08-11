@@ -5,25 +5,39 @@ struct PlayerView: View {
     let viewModel: PlayerViewModel
     @State private var showVideoPicker = false
     @State private var showAudioPicker = false
+    /// Shared with the playlist so outside taps (player, import, etc.) can dismiss swipe-delete.
+    @State private var openSwipeItemID: UUID?
 
     var body: some View {
         ZStack {
             (viewModel.isFullscreen ? Color.black : Theme.background)
                 .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { dismissOpenSwipe() }
 
             VStack(spacing: viewModel.isFullscreen ? 0 : 16) {
                 canvas
                     .frame(maxWidth: .infinity)
                     .modifier(PlayerStageLayout(isFullscreen: viewModel.isFullscreen))
                     .layoutPriority(1)
+                    .simultaneousGesture(
+                        TapGesture().onEnded { dismissOpenSwipe() }
+                    )
 
                 if !viewModel.isFullscreen {
                     PlaylistView(
                         viewModel: viewModel,
+                        openSwipeItemID: $openSwipeItemID,
                         isVideoPickerPending: showVideoPicker,
                         isAudioPickerPending: showAudioPicker,
-                        onImportVideo: { showVideoPicker = true },
-                        onImportAudio: { showAudioPicker = true }
+                        onImportVideo: {
+                            dismissOpenSwipe()
+                            showVideoPicker = true
+                        },
+                        onImportAudio: {
+                            dismissOpenSwipe()
+                            showAudioPicker = true
+                        }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .layoutPriority(0)
@@ -84,6 +98,12 @@ struct PlayerView: View {
             .animation(.easeInOut(duration: 0.2), value: viewModel.toastMessage)
         }
         .background(OrientationRefreshHook(isFullscreen: viewModel.isFullscreen))
+        .onChange(of: showVideoPicker) { _, isPresented in
+            if isPresented { dismissOpenSwipe() }
+        }
+        .onChange(of: showAudioPicker) { _, isPresented in
+            if isPresented { dismissOpenSwipe() }
+        }
         .task {
             viewModel.start()
             // Off the launch critical path: the first Files-picker presentation
@@ -91,6 +111,11 @@ struct PlayerView: View {
             try? await Task.sleep(for: .seconds(2))
             AudioImportWarmup.warmUp()
         }
+    }
+
+    private func dismissOpenSwipe() {
+        guard openSwipeItemID != nil else { return }
+        openSwipeItemID = nil
     }
 
     @ViewBuilder

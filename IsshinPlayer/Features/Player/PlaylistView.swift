@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PlaylistView: View {
     @Bindable var viewModel: PlayerViewModel
+    @Binding var openSwipeItemID: UUID?
     /// True while a picker is presenting. The system Files picker takes several hundred
     /// milliseconds to appear, so the button has to acknowledge the tap immediately.
     var isVideoPickerPending: Bool = false
@@ -20,18 +21,28 @@ struct PlaylistView: View {
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissOpenSwipe() }
             } else {
                 ScrollView {
                     LazyVStack(spacing: 10) {
                         ForEach(viewModel.playlist) { item in
                             let isCurrent = viewModel.currentItem?.id == item.id
-                            SwipeToDeleteRow {
+                            SwipeToDeleteRow(
+                                itemID: item.id,
+                                openItemID: $openSwipeItemID
+                            ) {
                                 viewModel.removeItem(id: item.id)
                             } content: {
                                 PlaylistCard(item: item, isCurrent: isCurrent)
                                     .contentShape(Rectangle())
                                     .onTapGesture {
-                                        viewModel.selectItem(id: item.id)
+                                        if openSwipeItemID == item.id {
+                                            dismissOpenSwipe()
+                                        } else {
+                                            dismissOpenSwipe()
+                                            viewModel.selectItem(id: item.id)
+                                        }
                                     }
                             }
                         }
@@ -39,6 +50,16 @@ struct PlaylistView: View {
                 }
                 .scrollIndicators(.visible)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 12)
+                        .onChanged { value in
+                            guard openSwipeItemID != nil else { return }
+                            // Only dismiss on vertical scroll so horizontal swipe isn't cancelled.
+                            if abs(value.translation.height) > abs(value.translation.width) * 1.2 {
+                                dismissOpenSwipe()
+                            }
+                        }
+                )
             }
         }
         .padding(14)
@@ -51,14 +72,23 @@ struct PlaylistView: View {
         )
     }
 
+    private func dismissOpenSwipe() {
+        guard openSwipeItemID != nil else { return }
+        openSwipeItemID = nil
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
-            Text("播放列表")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-            Text("\(viewModel.playlist.count)")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.textTertiary)
+            HStack(spacing: 10) {
+                Text("播放列表")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("\(viewModel.playlist.count)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { dismissOpenSwipe() }
 
             // Two direct buttons — Menu/confirmationDialog caused noticeable tap lag.
             Button(action: onImportVideo) {
@@ -81,9 +111,12 @@ struct PlaylistView: View {
             .disabled(isAudioPickerPending)
             .accessibilityLabel("导入音频")
 
-            Spacer()
+            Spacer(minLength: 0)
+                .contentShape(Rectangle())
+                .onTapGesture { dismissOpenSwipe() }
 
             Button {
+                dismissOpenSwipe()
                 viewModel.cyclePlaybackMode()
             } label: {
                 Image(systemName: viewModel.playbackMode.systemImage)
@@ -126,16 +159,22 @@ private struct ImportButtonFace: View {
 }
 
 /// Swipe left to reveal a small circular delete control.
+/// Only one row can be open at a time — opening another closes the previous.
 private struct SwipeToDeleteRow<Content: View>: View {
+    let itemID: UUID
+    @Binding var openItemID: UUID?
     var onDelete: () -> Void
     @ViewBuilder var content: () -> Content
 
     @State private var offset: CGFloat = 0
-    @State private var isOpen = false
+    @State private var dragBaseOffset: CGFloat = 0
+    @State private var isDragging = false
 
     private let revealWidth: CGFloat = 48
     private let buttonSize: CGFloat = 34
     private let threshold: CGFloat = 28
+
+    private var isOpen: Bool { openItemID == itemID }
 
     private var progress: CGFloat {
         min(1, max(0, -offset / revealWidth))
@@ -144,7 +183,7 @@ private struct SwipeToDeleteRow<Content: View>: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             Button {
-                close()
+                openItemID = nil
                 onDelete()
             } label: {
                 Image(systemName: "trash.fill")
@@ -169,6 +208,14 @@ private struct SwipeToDeleteRow<Content: View>: View {
         }
         .frame(maxWidth: .infinity)
         .clipped()
+        .onChange(of: openItemID) { _, newValue in
+            guard !isDragging else { return }
+            if newValue != itemID, offset != 0 {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
+                    offset = 0
+                }
+            }
+        }
     }
 
     private var swipeGesture: some Gesture {
@@ -178,42 +225,37 @@ private struct SwipeToDeleteRow<Content: View>: View {
                 let vertical = value.translation.height
                 guard abs(horizontal) > abs(vertical) * 1.15 else { return }
 
-                let next: CGFloat
-                if isOpen {
-                    next = min(0, max(-revealWidth, -revealWidth + horizontal))
-                } else {
-                    next = min(0, max(-revealWidth, horizontal))
+                if !isDragging {
+                    isDragging = true
+                    dragBaseOffset = offset
+                    // Claim the open slot immediately so any other revealed row closes.
+                    if openItemID != itemID {
+                        openItemID = itemID
+                    }
                 }
+
+                let next = min(0, max(-revealWidth, dragBaseOffset + horizontal))
                 withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86, blendDuration: 0.12)) {
                     offset = next
                 }
             }
             .onEnded { value in
-                let horizontal = value.predictedEndTranslation.width
-                let shouldOpen: Bool
-                if isOpen {
-                    shouldOpen = horizontal < revealWidth * 0.45
-                } else {
-                    shouldOpen = horizontal < -threshold
-                }
+                isDragging = false
+                let projected = dragBaseOffset + value.predictedEndTranslation.width
+                let shouldOpen = projected < -threshold
 
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.78, blendDuration: 0.15)) {
                     if shouldOpen {
                         offset = -revealWidth
-                        isOpen = true
+                        openItemID = itemID
                     } else {
                         offset = 0
-                        isOpen = false
+                        if openItemID == itemID {
+                            openItemID = nil
+                        }
                     }
                 }
             }
-    }
-
-    private func close() {
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
-            offset = 0
-            isOpen = false
-        }
     }
 }
 
