@@ -1,9 +1,9 @@
 import Photos
 import SwiftUI
+import UIKit
 
 struct PlaylistView: View {
     @Bindable var viewModel: PlayerViewModel
-    @Binding var openSwipeItemID: UUID?
     /// True while a picker is presenting. The system Files picker takes several hundred
     /// milliseconds to appear, so the button has to acknowledge the tap immediately.
     var isVideoPickerPending: Bool = false
@@ -12,6 +12,7 @@ struct PlaylistView: View {
     var onImportAudio: () -> Void
 
     @State private var showClearConfirm = false
+    @State private var openSwipeItemID: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -23,8 +24,6 @@ struct PlaylistView: View {
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                    .onTapGesture { dismissOpenSwipe() }
             } else {
                 ScrollView {
                     LazyVStack(spacing: 10) {
@@ -32,36 +31,20 @@ struct PlaylistView: View {
                             let isCurrent = viewModel.currentItem?.id == item.id
                             SwipeToDeleteRow(
                                 itemID: item.id,
-                                openItemID: $openSwipeItemID
+                                openItemID: $openSwipeItemID,
+                                onDelete: { viewModel.removeItem(id: item.id) },
+                                onTap: {
+                                    openSwipeItemID = nil
+                                    viewModel.selectItem(id: item.id)
+                                }
                             ) {
-                                viewModel.removeItem(id: item.id)
-                            } content: {
                                 PlaylistCard(item: item, isCurrent: isCurrent)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        if openSwipeItemID == item.id {
-                                            dismissOpenSwipe()
-                                        } else {
-                                            dismissOpenSwipe()
-                                            viewModel.selectItem(id: item.id)
-                                        }
-                                    }
                             }
                         }
                     }
                 }
                 .scrollIndicators(.visible)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 12)
-                        .onChanged { value in
-                            guard openSwipeItemID != nil else { return }
-                            // Only dismiss on vertical scroll so horizontal swipe isn't cancelled.
-                            if abs(value.translation.height) > abs(value.translation.width) * 1.2 {
-                                dismissOpenSwipe()
-                            }
-                        }
-                )
             }
         }
         .padding(14)
@@ -78,18 +61,13 @@ struct PlaylistView: View {
             titleVisibility: .visible
         ) {
             Button("清空全部", role: .destructive) {
-                dismissOpenSwipe()
+                openSwipeItemID = nil
                 viewModel.clearPlaylist()
             }
             Button("取消", role: .cancel) {}
         } message: {
             Text("将删除列表中的全部 \(viewModel.playlist.count) 个文件，且不可恢复。")
         }
-    }
-
-    private func dismissOpenSwipe() {
-        guard openSwipeItemID != nil else { return }
-        openSwipeItemID = nil
     }
 
     private var header: some View {
@@ -102,10 +80,7 @@ struct PlaylistView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
             }
-            .contentShape(Rectangle())
-            .onTapGesture { dismissOpenSwipe() }
 
-            // Two direct buttons — Menu/confirmationDialog caused noticeable tap lag.
             Button(action: onImportVideo) {
                 ImportButtonFace(
                     systemImage: "video.badge.plus",
@@ -127,11 +102,9 @@ struct PlaylistView: View {
             .accessibilityLabel("导入音频")
 
             Spacer(minLength: 0)
-                .contentShape(Rectangle())
-                .onTapGesture { dismissOpenSwipe() }
 
             Button {
-                dismissOpenSwipe()
+                openSwipeItemID = nil
                 showClearConfirm = true
             } label: {
                 Image(systemName: "trash")
@@ -147,7 +120,7 @@ struct PlaylistView: View {
             .accessibilityLabel("清空播放列表")
 
             Button {
-                dismissOpenSwipe()
+                openSwipeItemID = nil
                 viewModel.cyclePlaybackMode()
             } label: {
                 Image(systemName: viewModel.playbackMode.systemImage)
@@ -189,16 +162,18 @@ private struct ImportButtonFace: View {
     }
 }
 
-/// Swipe left to reveal a small circular delete control.
-/// Only one row can be open at a time — opening another closes the previous.
+/// Original red circular delete control, revealed by swiping left.
+/// Pan uses UIKit and only begins when the gesture is clearly horizontal,
+/// so vertical ScrollView flings are never stolen.
 private struct SwipeToDeleteRow<Content: View>: View {
     let itemID: UUID
     @Binding var openItemID: UUID?
     var onDelete: () -> Void
+    var onTap: () -> Void
     @ViewBuilder var content: () -> Content
 
     @State private var offset: CGFloat = 0
-    @State private var dragBaseOffset: CGFloat = 0
+    @State private var dragBase: CGFloat = 0
     @State private var isDragging = false
 
     private let revealWidth: CGFloat = 48
@@ -230,63 +205,174 @@ private struct SwipeToDeleteRow<Content: View>: View {
             .scaleEffect(0.72 + 0.28 * progress)
             .offset(x: (1 - progress) * 10)
             .padding(.trailing, 7)
-            .allowsHitTesting(isOpen)
+            .allowsHitTesting(isOpen && progress > 0.85)
 
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(
+                    RowGestureView(
+                        isOpen: isOpen,
+                        onTap: {
+                            if isOpen {
+                                close()
+                            } else {
+                                onTap()
+                            }
+                        },
+                        onSwipeBegan: {
+                            isDragging = true
+                            dragBase = offset
+                            if openItemID != itemID {
+                                openItemID = itemID
+                            }
+                        },
+                        onSwipeChanged: { translationX in
+                            offset = min(0, max(-revealWidth, dragBase + translationX))
+                        },
+                        onSwipeEnded: { translationX, velocityX in
+                            isDragging = false
+                            let projected = dragBase + translationX + velocityX * 0.18
+                            let shouldOpen = projected < -threshold
+                            withAnimation(.spring(response: 0.34, dampingFraction: 0.78, blendDuration: 0.15)) {
+                                if shouldOpen {
+                                    offset = -revealWidth
+                                    openItemID = itemID
+                                } else {
+                                    offset = 0
+                                    if openItemID == itemID {
+                                        openItemID = nil
+                                    }
+                                }
+                            }
+                        },
+                        onVerticalDismiss: {
+                            if openItemID != nil {
+                                openItemID = nil
+                            }
+                        }
+                    )
+                )
                 .offset(x: offset)
-                .gesture(swipeGesture)
         }
         .frame(maxWidth: .infinity)
         .clipped()
         .onChange(of: openItemID) { _, newValue in
-            guard !isDragging else { return }
-            if newValue != itemID, offset != 0 {
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
-                    offset = 0
-                }
+            guard !isDragging, newValue != itemID, offset != 0 else { return }
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
+                offset = 0
             }
         }
     }
 
-    private var swipeGesture: some Gesture {
-        DragGesture(minimumDistance: 16, coordinateSpace: .local)
-            .onChanged { value in
-                let horizontal = value.translation.width
-                let vertical = value.translation.height
-                guard abs(horizontal) > abs(vertical) * 1.15 else { return }
+    private func close() {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
+            offset = 0
+        }
+        if openItemID == itemID {
+            openItemID = nil
+        }
+    }
+}
 
-                if !isDragging {
-                    isDragging = true
-                    dragBaseOffset = offset
-                    // Claim the open slot immediately so any other revealed row closes.
-                    if openItemID != itemID {
-                        openItemID = itemID
-                    }
-                }
+/// Transparent touch layer over a row. Handles the row tap plus a pan that only
+/// begins on a clearly horizontal drag, leaving vertical pans to the enclosing
+/// scroll view (a SwiftUI `DragGesture` here would swallow fast flings instead).
+private struct RowGestureView: UIViewRepresentable {
+    var isOpen: Bool
+    var onTap: () -> Void
+    var onSwipeBegan: () -> Void
+    var onSwipeChanged: (_ translationX: CGFloat) -> Void
+    var onSwipeEnded: (_ translationX: CGFloat, _ velocityX: CGFloat) -> Void
+    var onVerticalDismiss: () -> Void
 
-                let next = min(0, max(-revealWidth, dragBaseOffset + horizontal))
-                withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86, blendDuration: 0.12)) {
-                    offset = next
-                }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+
+        let pan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePan(_:))
+        )
+        pan.delegate = context.coordinator
+        pan.cancelsTouchesInView = false
+        pan.delaysTouchesBegan = false
+        pan.maximumNumberOfTouches = 1
+        view.addGestureRecognizer(pan)
+
+        let tap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleTap)
+        )
+        tap.delegate = context.coordinator
+        tap.cancelsTouchesInView = false
+        view.addGestureRecognizer(tap)
+
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: RowGestureView
+        private var isPanning = false
+
+        init(parent: RowGestureView) {
+            self.parent = parent
+        }
+
+        @objc func handleTap() {
+            parent.onTap()
+        }
+
+        @objc func handlePan(_ pan: UIPanGestureRecognizer) {
+            let translation = pan.translation(in: pan.view).x
+            let velocity = pan.velocity(in: pan.view).x
+
+            switch pan.state {
+            case .began:
+                isPanning = true
+                parent.onSwipeBegan()
+                parent.onSwipeChanged(translation)
+            case .changed:
+                guard isPanning else { return }
+                parent.onSwipeChanged(translation)
+            case .ended, .cancelled, .failed:
+                guard isPanning else { return }
+                isPanning = false
+                parent.onSwipeEnded(translation, velocity)
+            default:
+                break
             }
-            .onEnded { value in
-                isDragging = false
-                let projected = dragBaseOffset + value.predictedEndTranslation.width
-                let shouldOpen = projected < -threshold
+        }
 
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.78, blendDuration: 0.15)) {
-                    if shouldOpen {
-                        offset = -revealWidth
-                        openItemID = itemID
-                    } else {
-                        offset = 0
-                        if openItemID == itemID {
-                            openItemID = nil
-                        }
-                    }
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+            let velocity = pan.velocity(in: pan.view)
+
+            guard abs(velocity.x) > abs(velocity.y) * 1.4 else {
+                if abs(velocity.y) > abs(velocity.x) {
+                    let dismiss = parent.onVerticalDismiss
+                    DispatchQueue.main.async(execute: dismiss)
                 }
+                return false
             }
+            // A closed row only opens on a left swipe; an open one also closes on a right swipe.
+            return parent.isOpen || velocity.x < 0
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            // The tap coexists with everything; the pan must win outright over scrolling.
+            gestureRecognizer is UITapGestureRecognizer
+        }
     }
 }
 
