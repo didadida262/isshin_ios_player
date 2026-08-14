@@ -366,13 +366,12 @@ final class PlayerViewModel {
                 }.value
                 let kind = MediaKind.infer(from: sourceURL)
                 let index = playlist.count + 1
-                let title: String
-                switch kind {
-                case .audio:
-                    title = Self.displayTitle(forAudioURL: sourceURL, imported: imported, fallbackIndex: index)
-                case .video:
-                    title = Self.displayTitle(forOpenedURL: sourceURL, imported: imported, fallbackIndex: index)
-                }
+                let title = Self.displayTitle(
+                    forOpenedURL: sourceURL,
+                    imported: imported,
+                    fallbackIndex: index,
+                    mediaKind: kind
+                )
                 let duration = await Self.loadDuration(url: imported.url)
                 let item = PlaylistItem(
                     title: title,
@@ -418,20 +417,46 @@ final class PlayerViewModel {
     private static func displayTitle(
         forOpenedURL source: URL,
         imported: ImportedMovie,
-        fallbackIndex: Int
+        fallbackIndex: Int,
+        mediaKind: MediaKind
     ) -> String {
-        let candidates = [
-            source.deletingPathExtension().lastPathComponent,
-            imported.suggestedName,
-            imported.url.deletingPathExtension().lastPathComponent
-        ]
-        for name in candidates {
-            guard let name else { continue }
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, !looksLikeGeneratedName(trimmed) else { continue }
-            return stripExtension(trimmed)
+        var candidates: [String] = []
+
+        // Prefer the system-provided display name while the security scope is active.
+        if let values = try? source.resourceValues(forKeys: [.localizedNameKey, .nameKey]) {
+            if let name = values.localizedName { candidates.append(name) }
+            if let name = values.name { candidates.append(name) }
         }
-        return "视频 \(fallbackIndex)"
+        candidates.append(source.lastPathComponent)
+        if let suggested = imported.suggestedName {
+            candidates.append(suggested)
+        }
+
+        // Dest is `UUID_originalName.ext` — recover the original portion.
+        let destName = imported.url.lastPathComponent
+        let withoutUUIDPrefix = destName.replacingOccurrences(
+            of: #"^[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}_"#,
+            with: "",
+            options: String.CompareOptions.regularExpression
+        )
+        if withoutUUIDPrefix != destName {
+            candidates.append(withoutUUIDPrefix)
+        }
+        candidates.append(destName)
+
+        for name in candidates {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let base = stripExtension(trimmed)
+            guard !base.isEmpty, !looksLikeGeneratedName(base) else { continue }
+            // Percent-encoded leftovers from some providers.
+            let decoded = base.removingPercentEncoding ?? base
+            let final = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !final.isEmpty else { continue }
+            return final
+        }
+
+        return mediaKind == .audio ? "音频 \(fallbackIndex)" : "视频 \(fallbackIndex)"
     }
 
     private static func displayTitle(
@@ -439,18 +464,12 @@ final class PlayerViewModel {
         imported: ImportedMovie,
         fallbackIndex: Int
     ) -> String {
-        let candidates = [
-            source.deletingPathExtension().lastPathComponent,
-            imported.suggestedName,
-            imported.url.deletingPathExtension().lastPathComponent
-        ]
-        for name in candidates {
-            guard let name else { continue }
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, !looksLikeGeneratedName(trimmed) else { continue }
-            return stripExtension(trimmed)
-        }
-        return "音频 \(fallbackIndex)"
+        displayTitle(
+            forOpenedURL: source,
+            imported: imported,
+            fallbackIndex: fallbackIndex,
+            mediaKind: .audio
+        )
     }
 
     private nonisolated static func copyImportFile(from sourceURL: URL) throws -> ImportedMovie {
@@ -511,16 +530,14 @@ final class PlayerViewModel {
     }
 
     private nonisolated static func looksLikeGeneratedName(_ name: String) -> Bool {
-        if name.range(
+        let base = (name as NSString).deletingPathExtension
+        let target = base.isEmpty ? name : base
+        // Only reject pure UUID filenames — Chinese titles often contain " - " / "-BV…"
+        // and were previously misclassified by a hyphen-count heuristic.
+        return target.range(
             of: #"^[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}$"#,
             options: String.CompareOptions.regularExpression
-        ) != nil {
-            return true
-        }
-        if name.count >= 16 && name.filter({ $0 == "-" }).count >= 2 {
-            return true
-        }
-        return false
+        ) != nil
     }
 
     private nonisolated static func exportMovie(from asset: PHAsset) async throws -> ImportedMovie? {
