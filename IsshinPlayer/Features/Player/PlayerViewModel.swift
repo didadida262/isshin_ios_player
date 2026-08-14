@@ -563,6 +563,22 @@ final class PlayerViewModel {
         }
     }
 
+    func clearPlaylist() {
+        guard !playlist.isEmpty else { return }
+        loadTask?.cancel()
+        let urls = playlist.map(\.fileURL)
+        playlist = []
+        currentIndex = nil
+        stopAndClear()
+        phase = .empty
+        nowPlaying.clear()
+        persistPlaylist()
+        for url in urls {
+            try? FileManager.default.removeItem(at: url)
+        }
+        showToast("已清空播放列表")
+    }
+
     func playNext() {
         guard let currentIndex, currentIndex + 1 < playlist.count else { return }
         enqueueLoad(playlist[currentIndex + 1], autoPlay: true)

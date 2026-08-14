@@ -11,6 +11,8 @@ struct PlaylistView: View {
     var onImportVideo: () -> Void
     var onImportAudio: () -> Void
 
+    @State private var showClearConfirm = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
@@ -70,6 +72,19 @@ struct PlaylistView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Theme.border, lineWidth: 1)
         )
+        .confirmationDialog(
+            "清空播放列表？",
+            isPresented: $showClearConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("清空全部", role: .destructive) {
+                dismissOpenSwipe()
+                viewModel.clearPlaylist()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将删除列表中的全部 \(viewModel.playlist.count) 个文件，且不可恢复。")
+        }
     }
 
     private func dismissOpenSwipe() {
@@ -114,6 +129,22 @@ struct PlaylistView: View {
             Spacer(minLength: 0)
                 .contentShape(Rectangle())
                 .onTapGesture { dismissOpenSwipe() }
+
+            Button {
+                dismissOpenSwipe()
+                showClearConfirm = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(
+                        viewModel.playlist.isEmpty ? Theme.textTertiary : Theme.danger
+                    )
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.playlist.isEmpty)
+            .accessibilityLabel("清空播放列表")
 
             Button {
                 dismissOpenSwipe()
