@@ -4,7 +4,6 @@ import UIKit
 
 struct VideoLibraryPickerView: View {
     let loadedIdentifiers: Set<String>
-    var maxSelection: Int = 20
     var onCancel: () -> Void
     var onConfirm: ([PHAsset]) -> Void
 
@@ -70,7 +69,7 @@ struct VideoLibraryPickerView: View {
 
     private var libraryContent: some View {
         VStack(spacing: 0) {
-            Text(selectedIDs.isEmpty ? "选择最多 \(maxSelection) 个视频" : "已选 \(selectedIDs.count) / \(maxSelection)")
+            Text(selectedIDs.isEmpty ? "点选要导入的视频" : "已选 \(selectedIDs.count) 个")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(maxWidth: .infinity)
@@ -140,7 +139,6 @@ struct VideoLibraryPickerView: View {
         if selectedIDs.contains(id) {
             selectedIDs.remove(id)
         } else {
-            guard selectedIDs.count < maxSelection else { return }
             selectedIDs.insert(id)
         }
     }
