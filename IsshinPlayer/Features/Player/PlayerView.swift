@@ -136,7 +136,7 @@ struct PlayerView: View {
             case .empty:
                 EmptyStateView(
                     title: "还没有内容",
-                    message: "点上方视频/音符按钮导入",
+                    message: "点下方视频/音符按钮导入",
                     actionTitle: nil,
                     action: nil
                 )
