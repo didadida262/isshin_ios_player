@@ -34,6 +34,8 @@ final class PlayerViewModel {
     private var loadSequence = 0
     private var persistTask: Task<Void, Never>?
     private var didStart = false
+    private var hasRestoredPlaylist = false
+    private var pendingOpenURLs: [URL] = []
 
     var currentItem: PlaylistItem? {
         guard let currentIndex, playlist.indices.contains(currentIndex) else { return nil }
@@ -117,9 +119,30 @@ final class PlayerViewModel {
               let item = playlist.first(where: { $0.id == firstID }) ?? playlist.first
         else {
             phase = .empty
+            hasRestoredPlaylist = true
+            await flushPendingOpenURLs()
             return
         }
         enqueueLoad(item, autoPlay: false)
+        hasRestoredPlaylist = true
+        await flushPendingOpenURLs()
+    }
+
+    /// Entry point for system “Open In / Share → Isshin Player”.
+    /// Queues until playlist restore finishes so we don't race cold launch.
+    func handleIncomingURLs(_ urls: [URL]) {
+        let files = urls.filter { $0.isFileURL }
+        guard !files.isEmpty else { return }
+        pendingOpenURLs.append(contentsOf: files)
+        start()
+        Task { await flushPendingOpenURLs() }
+    }
+
+    private func flushPendingOpenURLs() async {
+        guard hasRestoredPlaylist, !pendingOpenURLs.isEmpty else { return }
+        let urls = pendingOpenURLs
+        pendingOpenURLs.removeAll()
+        await importOpenedFiles(from: urls)
     }
 
     /// Coalesced so a multi-item import doesn't encode + write JSON once per item.
@@ -304,6 +327,111 @@ final class PlayerViewModel {
         } else {
             showToast("已导入 \(addedCount) 个音频")
         }
+    }
+
+    /// Import files handed over by another app (Open In / document open).
+    /// Always starts playback on the first successfully imported item.
+    func importOpenedFiles(from urls: [URL]) async {
+        guard !urls.isEmpty else { return }
+        importGeneration += 1
+        let generation = importGeneration
+        let startedEmpty = playlist.isEmpty
+
+        if isFullscreen {
+            exitFullscreen()
+        }
+        showToast(urls.count == 1 ? "正在打开…" : "正在导入 \(urls.count) 个文件…")
+
+        var firstNew: PlaylistItem?
+        var addedCount = 0
+        var failed = 0
+
+        defer {
+            if phase == .loading, playlist.isEmpty, currentItem == nil {
+                phase = .empty
+            }
+        }
+
+        for url in urls {
+            guard generation == importGeneration else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessed { url.stopAccessingSecurityScopedResource() }
+            }
+
+            do {
+                let sourceURL = url
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    try Self.copyImportFile(from: sourceURL)
+                }.value
+                let kind = MediaKind.infer(from: sourceURL)
+                let index = playlist.count + 1
+                let title: String
+                switch kind {
+                case .audio:
+                    title = Self.displayTitle(forAudioURL: sourceURL, imported: imported, fallbackIndex: index)
+                case .video:
+                    title = Self.displayTitle(forOpenedURL: sourceURL, imported: imported, fallbackIndex: index)
+                }
+                let duration = await Self.loadDuration(url: imported.url)
+                let item = PlaylistItem(
+                    title: title,
+                    fileURL: imported.url,
+                    duration: duration,
+                    mediaKind: kind
+                )
+                playlist.append(item)
+                addedCount += 1
+                persistPlaylist()
+
+                if firstNew == nil {
+                    firstNew = item
+                }
+            } catch {
+                failed += 1
+                print("Open-in import failed: \(error.localizedDescription)")
+            }
+        }
+
+        guard generation == importGeneration else { return }
+
+        if addedCount == 0 {
+            if startedEmpty {
+                phase = .error("未能打开文件，请重试")
+            } else {
+                showToast("未能打开所选文件")
+            }
+            return
+        }
+
+        if let firstNew {
+            enqueueLoad(firstNew, autoPlay: true)
+        }
+
+        if failed > 0 {
+            showToast("已打开 \(addedCount) 个，\(failed) 个失败")
+        } else if urls.count > 1 {
+            showToast("已打开 \(addedCount) 个文件")
+        }
+    }
+
+    private static func displayTitle(
+        forOpenedURL source: URL,
+        imported: ImportedMovie,
+        fallbackIndex: Int
+    ) -> String {
+        let candidates = [
+            source.deletingPathExtension().lastPathComponent,
+            imported.suggestedName,
+            imported.url.deletingPathExtension().lastPathComponent
+        ]
+        for name in candidates {
+            guard let name else { continue }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !looksLikeGeneratedName(trimmed) else { continue }
+            return stripExtension(trimmed)
+        }
+        return "视频 \(fallbackIndex)"
     }
 
     private static func displayTitle(

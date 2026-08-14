@@ -16,6 +16,9 @@ struct IsshinPlayerApp: App {
                 .preferredColorScheme(.dark)
                 .tint(Theme.selectionGreen)
                 .background(Theme.background.ignoresSafeArea())
+                .onOpenURL { url in
+                    viewModel.handleIncomingURLs([url])
+                }
         }
     }
 }
