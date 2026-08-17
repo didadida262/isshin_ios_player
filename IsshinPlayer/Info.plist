@@ -27,7 +27,7 @@
 	<key>UISupportsDocumentBrowser</key>
 	<false/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<false/>
+	<true/>
 	<key>UTImportedTypeDeclarations</key>
 	<array/>
 	<key>CFBundleDocumentTypes</key>

@@ -47,6 +47,11 @@ final class PlayerViewModel {
         Set(playlist.compactMap(\.assetIdentifier))
     }
 
+    /// File fingerprints (size + original name) for folder-browser “已加载” state.
+    var loadedFileFingerprints: Set<String> {
+        Set(playlist.compactMap { FileImportIdentity.fingerprint(forPlaylistFileURL: $0.fileURL) })
+    }
+
     var hasNext: Bool {
         guard let currentIndex else { return false }
         return currentIndex + 1 < playlist.count
@@ -257,11 +262,13 @@ final class PlayerViewModel {
         let generation = importGeneration
         let hadCurrent = currentItem != nil
         let startedEmpty = playlist.isEmpty
+        var alreadyLoaded = loadedFileFingerprints
 
         showToast("正在导入…")
 
         var firstNew: PlaylistItem?
         var addedCount = 0
+        var skipped = 0
         var failed = 0
 
         defer {
@@ -272,6 +279,12 @@ final class PlayerViewModel {
 
         for url in urls {
             guard generation == importGeneration else { return }
+            if let fingerprint = FileImportIdentity.fingerprint(forSourceURL: url),
+               alreadyLoaded.contains(fingerprint) {
+                skipped += 1
+                continue
+            }
+
             let accessed = url.startAccessingSecurityScopedResource()
             defer {
                 if accessed { url.stopAccessingSecurityScopedResource() }
@@ -299,6 +312,9 @@ final class PlayerViewModel {
                 )
                 playlist.append(item)
                 addedCount += 1
+                if let fingerprint = FileImportIdentity.fingerprint(forPlaylistFileURL: imported.url) {
+                    alreadyLoaded.insert(fingerprint)
+                }
                 persistPlaylist()
 
                 if firstNew == nil {
@@ -316,7 +332,9 @@ final class PlayerViewModel {
         guard generation == importGeneration else { return }
 
         if addedCount == 0 {
-            if startedEmpty {
+            if skipped > 0, failed == 0 {
+                showToast(skipped == urls.count ? "所选文件均已在列表中" : "没有新文件可导入")
+            } else if startedEmpty {
                 phase = .error("未能导入文件，请重试")
             } else {
                 showToast("未能导入所选文件")
@@ -330,6 +348,8 @@ final class PlayerViewModel {
 
         if failed > 0 {
             showToast("已导入 \(addedCount) 个，\(failed) 个失败")
+        } else if skipped > 0 {
+            showToast("已导入 \(addedCount) 个，跳过 \(skipped) 个已加载")
         } else {
             showToast("已导入 \(addedCount) 个文件")
         }

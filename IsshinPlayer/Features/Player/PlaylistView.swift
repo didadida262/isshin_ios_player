@@ -67,12 +67,12 @@ struct PlaylistView: View {
             Button("照片") {
                 onImportFromPhotos()
             }
-            Button("文件夹") {
+            Button("文件") {
                 onImportFromFiles()
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("照片：导入相册中的视频\n文件夹：导入本地音视频文件")
+            Text("照片：导入相册中的视频\n文件：从最近项目或浏览中多选音视频")
         }
         .confirmationDialog(
             "彻底删除？",
@@ -149,7 +149,7 @@ struct PlaylistView: View {
             .buttonStyle(.plain)
             .disabled(isImportPickerPending)
             .accessibilityLabel("导入")
-            .accessibilityHint("从照片或文件夹导入")
+            .accessibilityHint("从照片或文件导入")
 
             Spacer(minLength: 0)
 

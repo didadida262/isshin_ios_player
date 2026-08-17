@@ -5,6 +5,13 @@ struct PlayerView: View {
     let viewModel: PlayerViewModel
     @State private var showPhotosPicker = false
     @State private var showFilesPicker = false
+    @State private var showFileReview = false
+    @State private var pendingFileURLs: [URL] = []
+    @State private var fileAccessHold = SecurityScopedURLHold()
+
+    private var isImportPickerPending: Bool {
+        showPhotosPicker || showFilesPicker || showFileReview
+    }
 
     var body: some View {
         ZStack {
@@ -20,7 +27,7 @@ struct PlayerView: View {
                 if !viewModel.isFullscreen {
                     PlaylistView(
                         viewModel: viewModel,
-                        isImportPickerPending: showPhotosPicker || showFilesPicker,
+                        isImportPickerPending: isImportPickerPending,
                         onImportFromPhotos: { showPhotosPicker = true },
                         onImportFromFiles: { showFilesPicker = true }
                     )
@@ -37,7 +44,7 @@ struct PlayerView: View {
         .persistentSystemOverlays(viewModel.isFullscreen ? .hidden : .automatic)
         .sheet(isPresented: $showPhotosPicker) {
             VideoLibraryPickerView(
-                loadedIdentifiers: viewModel.loadedAssetIdentifiers,
+                viewModel: viewModel,
                 onCancel: { showPhotosPicker = false },
                 onConfirm: { assets in
                     showPhotosPicker = false
@@ -64,11 +71,43 @@ struct PlayerView: View {
         ) { result in
             switch result {
             case .success(let urls):
-                Task { await viewModel.importFiles(from: urls) }
+                let media = urls.filter { FileImportIdentity.isMediaFile($0) }
+                guard !media.isEmpty else {
+                    viewModel.showToast("未选中可用的音视频文件")
+                    return
+                }
+                fileAccessHold.take(media)
+                pendingFileURLs = media
+                showFileReview = true
             case .failure(let error):
                 print("Files fileImporter failed: \(error.localizedDescription)")
                 viewModel.showToast("无法打开文件选择器")
             }
+        }
+        .sheet(isPresented: $showFileReview, onDismiss: {
+            // Cancel / swipe-down path. Confirm path releases after import.
+            if !pendingFileURLs.isEmpty {
+                fileAccessHold.release()
+                pendingFileURLs = []
+            }
+        }) {
+            FileImportReviewView(
+                viewModel: viewModel,
+                urls: pendingFileURLs,
+                onCancel: {
+                    fileAccessHold.release()
+                    pendingFileURLs = []
+                    showFileReview = false
+                },
+                onConfirm: { urls in
+                    Task {
+                        await viewModel.importFiles(from: urls)
+                        fileAccessHold.release()
+                        pendingFileURLs = []
+                        showFileReview = false
+                    }
+                }
+            )
         }
         .preferredColorScheme(.dark)
         .tint(Theme.selectionGreen)
@@ -120,7 +159,7 @@ struct PlayerView: View {
             case .empty:
                 EmptyStateView(
                     title: "还没有内容",
-                    message: "点下方 + 从照片或文件夹导入",
+                    message: "点下方 + 从照片或文件导入",
                     actionTitle: nil,
                     action: nil
                 )

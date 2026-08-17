@@ -3,7 +3,11 @@ import SwiftUI
 import UIKit
 
 struct VideoLibraryPickerView: View {
-    let loadedIdentifiers: Set<String>
+    /// Read live from the view model — do not pass a pre-copied `Set`.
+    /// `.sheet(isPresented:)` can evaluate its content while the playlist is still
+    /// empty / unrestored, which would freeze an empty snapshot and leave already-
+    /// imported clips without the「已加载」overlay.
+    let viewModel: PlayerViewModel
     var onCancel: () -> Void
     var onConfirm: ([PHAsset]) -> Void
 
@@ -11,6 +15,10 @@ struct VideoLibraryPickerView: View {
     @State private var selectedIDs: Set<String> = []
     @State private var authorization: PHAuthorizationStatus = .notDetermined
     @State private var isLoadingLibrary = true
+
+    private var loadedIdentifiers: Set<String> {
+        viewModel.loadedAssetIdentifiers
+    }
 
     private let columns = [
         GridItem(.flexible(), spacing: 3),
