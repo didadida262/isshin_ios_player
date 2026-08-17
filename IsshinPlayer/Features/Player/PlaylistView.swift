@@ -74,39 +74,64 @@ struct PlaylistView: View {
         } message: {
             Text("照片：导入相册中的视频\n文件：从最近项目或浏览中多选音视频")
         }
-        .confirmationDialog(
-            "彻底删除？",
-            isPresented: Binding(
-                get: { pendingDeleteItemID != nil },
-                set: { if !$0 { pendingDeleteItemID = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("彻底删除", role: .destructive) {
-                if let id = pendingDeleteItemID {
-                    viewModel.removeItem(id: id)
+        .fullScreenCover(isPresented: deleteDialogPresented) {
+            BlurConfirmDialog(
+                title: deleteDialogTitle,
+                message: deleteDialogMessage,
+                confirmTitle: deleteDialogConfirmTitle,
+                onConfirm: {
+                    performPendingDelete()
+                },
+                onCancel: {
+                    dismissDeleteDialog()
                 }
-                pendingDeleteItemID = nil
-            }
-            Button("取消", role: .cancel) {
-                pendingDeleteItemID = nil
-            }
-        } message: {
-            Text(permanentDeleteWarning(forItemID: pendingDeleteItemID))
+            )
+            .presentationBackground(.clear)
         }
-        .confirmationDialog(
-            "彻底清空播放列表？",
-            isPresented: $showClearConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("彻底删除全部", role: .destructive) {
-                openSwipeItemID = nil
-                viewModel.clearPlaylist()
+    }
+
+    private var deleteDialogPresented: Binding<Bool> {
+        Binding(
+            get: { pendingDeleteItemID != nil || showClearConfirm },
+            set: { presented in
+                if !presented {
+                    dismissDeleteDialog()
+                }
             }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text(permanentClearWarning)
+        )
+    }
+
+    private var deleteDialogTitle: String {
+        showClearConfirm ? "彻底清空播放列表？" : "彻底删除？"
+    }
+
+    private var deleteDialogMessage: String {
+        if showClearConfirm {
+            return permanentClearWarning
         }
+        return permanentDeleteWarning(forItemID: pendingDeleteItemID)
+    }
+
+    private var deleteDialogConfirmTitle: String {
+        showClearConfirm ? "彻底删除全部" : "彻底删除"
+    }
+
+    private func performPendingDelete() {
+        if showClearConfirm {
+            openSwipeItemID = nil
+            viewModel.clearPlaylist()
+            showClearConfirm = false
+            return
+        }
+        if let id = pendingDeleteItemID {
+            viewModel.removeItem(id: id)
+        }
+        pendingDeleteItemID = nil
+    }
+
+    private func dismissDeleteDialog() {
+        pendingDeleteItemID = nil
+        showClearConfirm = false
     }
 
     private var permanentClearWarning: String {
