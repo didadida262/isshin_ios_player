@@ -23,7 +23,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>用于从相册选择并导入视频到播放列表。</string>
+	<string>用于从相册选择并导入视频；在你确认彻底删除时，也会从相册移除对应原片。</string>
 	<key>UISupportsDocumentBrowser</key>
 	<false/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

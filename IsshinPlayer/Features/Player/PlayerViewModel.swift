@@ -251,7 +251,7 @@ final class PlayerViewModel {
         }
     }
 
-    func importAudio(from urls: [URL]) async {
+    func importFiles(from urls: [URL]) async {
         guard !urls.isEmpty else { return }
         importGeneration += 1
         let generation = importGeneration
@@ -282,14 +282,20 @@ final class PlayerViewModel {
                 let imported = try await Task.detached(priority: .userInitiated) {
                     try Self.copyImportFile(from: sourceURL)
                 }.value
+                let kind = MediaKind.infer(from: sourceURL)
                 let index = playlist.count + 1
-                let title = Self.displayTitle(forAudioURL: url, imported: imported, fallbackIndex: index)
+                let title = Self.displayTitle(
+                    forOpenedURL: sourceURL,
+                    imported: imported,
+                    fallbackIndex: index,
+                    mediaKind: kind
+                )
                 let duration = await Self.loadDuration(url: imported.url)
                 let item = PlaylistItem(
                     title: title,
                     fileURL: imported.url,
                     duration: duration,
-                    mediaKind: .audio
+                    mediaKind: kind
                 )
                 playlist.append(item)
                 addedCount += 1
@@ -303,7 +309,7 @@ final class PlayerViewModel {
                 }
             } catch {
                 failed += 1
-                print("Audio import failed: \(error.localizedDescription)")
+                print("File import failed: \(error.localizedDescription)")
             }
         }
 
@@ -311,9 +317,9 @@ final class PlayerViewModel {
 
         if addedCount == 0 {
             if startedEmpty {
-                phase = .error("未能导入音频，请重试")
+                phase = .error("未能导入文件，请重试")
             } else {
-                showToast("未能导入所选音频")
+                showToast("未能导入所选文件")
             }
             return
         }
@@ -325,7 +331,7 @@ final class PlayerViewModel {
         if failed > 0 {
             showToast("已导入 \(addedCount) 个，\(failed) 个失败")
         } else {
-            showToast("已导入 \(addedCount) 个音频")
+            showToast("已导入 \(addedCount) 个文件")
         }
     }
 
@@ -457,19 +463,6 @@ final class PlayerViewModel {
         }
 
         return mediaKind == .audio ? "音频 \(fallbackIndex)" : "视频 \(fallbackIndex)"
-    }
-
-    private static func displayTitle(
-        forAudioURL source: URL,
-        imported: ImportedMovie,
-        fallbackIndex: Int
-    ) -> String {
-        displayTitle(
-            forOpenedURL: source,
-            imported: imported,
-            fallbackIndex: fallbackIndex,
-            mediaKind: .audio
-        )
     }
 
     private nonisolated static func copyImportFile(from sourceURL: URL) throws -> ImportedMovie {
@@ -681,12 +674,97 @@ final class PlayerViewModel {
     }
 
     func removeItem(id: UUID) {
-        guard let index = playlist.firstIndex(where: { $0.id == id }) else { return }
+        guard let item = playlist.first(where: { $0.id == id }) else { return }
+        Task { await permanentlyRemove(item) }
+    }
+
+    func clearPlaylist() {
+        guard !playlist.isEmpty else { return }
+        let snapshot = playlist
+        Task { await permanentlyClear(snapshot) }
+    }
+
+    private func permanentlyRemove(_ item: PlaylistItem) async {
+        guard playlist.contains(where: { $0.id == item.id }) else { return }
+
+        if let assetID = item.assetIdentifier {
+            switch await deleteFromPhotoLibrary(identifiers: [assetID]) {
+            case .deleted, .nothingToDelete:
+                break
+            case .denied:
+                showToast("需要相册权限才能彻底删除原片")
+                return
+            case .cancelled:
+                showToast("已取消删除")
+                return
+            case .failed:
+                showToast("未能从相册删除原片")
+                return
+            }
+        }
+
+        guard let index = playlist.firstIndex(where: { $0.id == item.id }) else { return }
+        finishLocalRemoval(at: index)
+        showToast("已彻底删除")
+    }
+
+    private func permanentlyClear(_ snapshot: [PlaylistItem]) async {
+        let photoIDs = snapshot.compactMap(\.assetIdentifier)
+        if !photoIDs.isEmpty {
+            switch await deleteFromPhotoLibrary(identifiers: photoIDs) {
+            case .deleted, .nothingToDelete:
+                break
+            case .denied:
+                showToast("需要相册权限才能彻底删除原片")
+                return
+            case .cancelled:
+                showToast("已取消删除")
+                return
+            case .failed:
+                showToast("未能从相册删除原片")
+                return
+            }
+        }
+
+        loadTask?.cancel()
+        let urls = snapshot.map(\.fileURL)
+        // Only clear items that were in the confirmed snapshot (avoid wiping newer imports).
+        let ids = Set(snapshot.map(\.id))
+        playlist.removeAll { ids.contains($0.id) }
+        if playlist.isEmpty {
+            currentIndex = nil
+            stopAndClear()
+            phase = .empty
+            nowPlaying.clear()
+        } else if let current = currentItem, let idx = playlist.firstIndex(where: { $0.id == current.id }) {
+            currentIndex = idx
+        } else if let first = playlist.first {
+            enqueueLoad(first, autoPlay: true)
+        } else {
+            currentIndex = nil
+            stopAndClear()
+            phase = .empty
+        }
+        persistPlaylist()
+        for url in urls {
+            Self.permanentlyDeleteImportedFile(at: url)
+        }
+        showToast("已彻底删除全部文件")
+    }
+
+    private func finishLocalRemoval(at index: Int) {
         let removingCurrent = index == currentIndex
         let fileURL = playlist[index].fileURL
-        playlist.remove(at: index)
 
-        try? FileManager.default.removeItem(at: fileURL)
+        // Release AVPlayer's hold before unlinking — otherwise removeItem can fail
+        // silently while the file stays on disk.
+        if removingCurrent {
+            loadTask?.cancel()
+            stopAndClear()
+        }
+
+        playlist.remove(at: index)
+        Self.permanentlyDeleteImportedFile(at: fileURL)
         persistPlaylist()
 
         if playlist.isEmpty {
@@ -708,20 +786,56 @@ final class PlayerViewModel {
         }
     }
 
-    func clearPlaylist() {
-        guard !playlist.isEmpty else { return }
-        loadTask?.cancel()
-        let urls = playlist.map(\.fileURL)
-        playlist = []
-        currentIndex = nil
-        stopAndClear()
-        phase = .empty
-        nowPlaying.clear()
-        persistPlaylist()
-        for url in urls {
-            try? FileManager.default.removeItem(at: url)
+    private enum PhotoDeleteResult {
+        case deleted
+        case nothingToDelete
+        case denied
+        case cancelled
+        case failed
+    }
+
+    /// Deletes the original PHAssets. iOS shows its own system confirmation sheet.
+    private func deleteFromPhotoLibrary(identifiers: [String]) async -> PhotoDeleteResult {
+        let unique = Array(Set(identifiers))
+        guard !unique.isEmpty else { return .nothingToDelete }
+
+        var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if status == .notDetermined {
+            status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         }
-        showToast("已清空播放列表")
+        guard status == .authorized || status == .limited else {
+            return .denied
+        }
+
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: unique, options: nil)
+        guard assets.count > 0 else { return .nothingToDelete }
+
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.deleteAssets(assets)
+            }
+            return .deleted
+        } catch {
+            let nsError = error as NSError
+            // User dismissed the system "Delete from Photo Library?" sheet.
+            if nsError.code == NSUserCancelledError
+                || (nsError.domain == NSCocoaErrorDomain && nsError.code == 3072) {
+                return .cancelled
+            }
+            print("Photos delete failed: \(error.localizedDescription)")
+            return .failed
+        }
+    }
+
+    /// Deletes the sandboxed import copy under Documents/Imports.
+    private nonisolated static func permanentlyDeleteImportedFile(at url: URL) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return }
+        do {
+            try fm.removeItem(at: url)
+        } catch {
+            print("Permanent delete failed: \(error.localizedDescription)")
+        }
     }
 
     func playNext() {

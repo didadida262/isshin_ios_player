@@ -3,8 +3,8 @@ import UniformTypeIdentifiers
 
 struct PlayerView: View {
     let viewModel: PlayerViewModel
-    @State private var showVideoPicker = false
-    @State private var showAudioPicker = false
+    @State private var showPhotosPicker = false
+    @State private var showFilesPicker = false
 
     var body: some View {
         ZStack {
@@ -20,10 +20,9 @@ struct PlayerView: View {
                 if !viewModel.isFullscreen {
                     PlaylistView(
                         viewModel: viewModel,
-                        isVideoPickerPending: showVideoPicker,
-                        isAudioPickerPending: showAudioPicker,
-                        onImportVideo: { showVideoPicker = true },
-                        onImportAudio: { showAudioPicker = true }
+                        isImportPickerPending: showPhotosPicker || showFilesPicker,
+                        onImportFromPhotos: { showPhotosPicker = true },
+                        onImportFromFiles: { showFilesPicker = true }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .layoutPriority(0)
@@ -36,12 +35,12 @@ struct PlayerView: View {
         }
         .statusBarHidden(viewModel.isFullscreen)
         .persistentSystemOverlays(viewModel.isFullscreen ? .hidden : .automatic)
-        .sheet(isPresented: $showVideoPicker) {
+        .sheet(isPresented: $showPhotosPicker) {
             VideoLibraryPickerView(
                 loadedIdentifiers: viewModel.loadedAssetIdentifiers,
-                onCancel: { showVideoPicker = false },
+                onCancel: { showPhotosPicker = false },
                 onConfirm: { assets in
-                    showVideoPicker = false
+                    showPhotosPicker = false
                     Task {
                         await viewModel.importVideos(from: assets)
                     }
@@ -49,15 +48,25 @@ struct PlayerView: View {
             )
         }
         .fileImporter(
-            isPresented: $showAudioPicker,
-            allowedContentTypes: [.audio, .mp3, .mpeg4Audio, .wav, .aiff],
+            isPresented: $showFilesPicker,
+            allowedContentTypes: [
+                .audiovisualContent,
+                .movie,
+                .mpeg4Movie,
+                .quickTimeMovie,
+                .audio,
+                .mp3,
+                .mpeg4Audio,
+                .wav,
+                .aiff
+            ],
             allowsMultipleSelection: true
         ) { result in
             switch result {
             case .success(let urls):
-                Task { await viewModel.importAudio(from: urls) }
+                Task { await viewModel.importFiles(from: urls) }
             case .failure(let error):
-                print("Audio fileImporter failed: \(error.localizedDescription)")
+                print("Files fileImporter failed: \(error.localizedDescription)")
                 viewModel.showToast("无法打开文件选择器")
             }
         }
@@ -89,7 +98,7 @@ struct PlayerView: View {
             // Off the launch critical path: the first Files-picker presentation
             // otherwise pays for DocumentManager bring-up on the user's tap.
             try? await Task.sleep(for: .seconds(2))
-            AudioImportWarmup.warmUp()
+            FilesImportWarmup.warmUp()
         }
     }
 
@@ -111,7 +120,7 @@ struct PlayerView: View {
             case .empty:
                 EmptyStateView(
                     title: "还没有内容",
-                    message: "点下方视频/音符按钮导入",
+                    message: "点下方 + 从照片或文件夹导入",
                     actionTitle: nil,
                     action: nil
                 )

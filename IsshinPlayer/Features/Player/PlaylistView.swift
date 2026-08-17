@@ -6,12 +6,13 @@ struct PlaylistView: View {
     @Bindable var viewModel: PlayerViewModel
     /// True while a picker is presenting. The system Files picker takes several hundred
     /// milliseconds to appear, so the button has to acknowledge the tap immediately.
-    var isVideoPickerPending: Bool = false
-    var isAudioPickerPending: Bool = false
-    var onImportVideo: () -> Void
-    var onImportAudio: () -> Void
+    var isImportPickerPending: Bool = false
+    var onImportFromPhotos: () -> Void
+    var onImportFromFiles: () -> Void
 
+    @State private var showImportSource = false
     @State private var showClearConfirm = false
+    @State private var pendingDeleteItemID: UUID?
     @State private var openSwipeItemID: UUID?
 
     var body: some View {
@@ -19,7 +20,7 @@ struct PlaylistView: View {
             header
 
             if viewModel.playlist.isEmpty {
-                Text("暂无内容，点视频/音符按钮导入")
+                Text("暂无内容，点 + 导入")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -32,7 +33,10 @@ struct PlaylistView: View {
                             SwipeToDeleteRow(
                                 itemID: item.id,
                                 openItemID: $openSwipeItemID,
-                                onDelete: { viewModel.removeItem(id: item.id) },
+                                onDelete: {
+                                    openSwipeItemID = nil
+                                    pendingDeleteItemID = item.id
+                                },
                                 onTap: {
                                     openSwipeItemID = nil
                                     viewModel.selectItem(id: item.id)
@@ -56,18 +60,71 @@ struct PlaylistView: View {
                 .stroke(Theme.border, lineWidth: 1)
         )
         .confirmationDialog(
-            "清空播放列表？",
+            "选择导入来源",
+            isPresented: $showImportSource,
+            titleVisibility: .visible
+        ) {
+            Button("照片") {
+                onImportFromPhotos()
+            }
+            Button("文件夹") {
+                onImportFromFiles()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("照片：导入相册中的视频\n文件夹：导入本地音视频文件")
+        }
+        .confirmationDialog(
+            "彻底删除？",
+            isPresented: Binding(
+                get: { pendingDeleteItemID != nil },
+                set: { if !$0 { pendingDeleteItemID = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("彻底删除", role: .destructive) {
+                if let id = pendingDeleteItemID {
+                    viewModel.removeItem(id: id)
+                }
+                pendingDeleteItemID = nil
+            }
+            Button("取消", role: .cancel) {
+                pendingDeleteItemID = nil
+            }
+        } message: {
+            Text(permanentDeleteWarning(forItemID: pendingDeleteItemID))
+        }
+        .confirmationDialog(
+            "彻底清空播放列表？",
             isPresented: $showClearConfirm,
             titleVisibility: .visible
         ) {
-            Button("清空全部", role: .destructive) {
+            Button("彻底删除全部", role: .destructive) {
                 openSwipeItemID = nil
                 viewModel.clearPlaylist()
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("将删除列表中的全部 \(viewModel.playlist.count) 个文件，且不可恢复。")
+            Text(permanentClearWarning)
         }
+    }
+
+    private var permanentClearWarning: String {
+        let photoCount = viewModel.playlist.filter { $0.assetIdentifier != nil }.count
+        if photoCount > 0 {
+            return "将永久删除列表中的全部 \(viewModel.playlist.count) 个文件（含 \(photoCount) 个相册原片），且不可恢复。"
+        }
+        return "将永久删除列表中的全部 \(viewModel.playlist.count) 个文件，且不可恢复。"
+    }
+
+    private func permanentDeleteWarning(forItemID id: UUID?) -> String {
+        let fromPhotos = id.flatMap { itemID in
+            viewModel.playlist.first(where: { $0.id == itemID })?.assetIdentifier
+        } != nil
+        if fromPhotos {
+            return "将永久删除该文件，并从相册移除原片，且不可恢复。"
+        }
+        return "将永久删除该文件，且不可恢复。"
     }
 
     private var header: some View {
@@ -81,25 +138,18 @@ struct PlaylistView: View {
                     .foregroundStyle(Theme.textTertiary)
             }
 
-            Button(action: onImportVideo) {
+            Button {
+                showImportSource = true
+            } label: {
                 ImportButtonFace(
-                    systemImage: "video.badge.plus",
-                    isPending: isVideoPickerPending
+                    systemImage: "plus",
+                    isPending: isImportPickerPending
                 )
             }
             .buttonStyle(.plain)
-            .disabled(isVideoPickerPending)
-            .accessibilityLabel("导入视频")
-
-            Button(action: onImportAudio) {
-                ImportButtonFace(
-                    systemImage: "music.note",
-                    isPending: isAudioPickerPending
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(isAudioPickerPending)
-            .accessibilityLabel("导入音频")
+            .disabled(isImportPickerPending)
+            .accessibilityLabel("导入")
+            .accessibilityHint("从照片或文件夹导入")
 
             Spacer(minLength: 0)
 
@@ -117,7 +167,7 @@ struct PlaylistView: View {
             }
             .buttonStyle(.plain)
             .disabled(viewModel.playlist.isEmpty)
-            .accessibilityLabel("清空播放列表")
+            .accessibilityLabel("彻底清空播放列表")
 
             Button {
                 openSwipeItemID = nil
@@ -200,7 +250,7 @@ private struct SwipeToDeleteRow<Content: View>: View {
                     .shadow(color: Color.red.opacity(0.35 * progress), radius: 6, y: 1)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("删除")
+            .accessibilityLabel("彻底删除")
             .opacity(progress)
             .scaleEffect(0.72 + 0.28 * progress)
             .offset(x: (1 - progress) * 10)
