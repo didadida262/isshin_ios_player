@@ -53,13 +53,11 @@ final class PlayerViewModel {
     }
 
     var hasNext: Bool {
-        guard let currentIndex else { return false }
-        return currentIndex + 1 < playlist.count
+        currentItem != nil && !playlist.isEmpty
     }
 
     var hasPrevious: Bool {
-        guard let currentIndex else { return false }
-        return currentIndex > 0
+        currentItem != nil && !playlist.isEmpty
     }
 
     /// `init` must stay free of global side effects.
@@ -859,13 +857,37 @@ final class PlayerViewModel {
     }
 
     func playNext() {
-        guard let currentIndex, currentIndex + 1 < playlist.count else { return }
-        enqueueLoad(playlist[currentIndex + 1], autoPlay: true)
+        guard !playlist.isEmpty, let currentIndex else { return }
+        switch playbackMode {
+        case .sequential, .repeatOne:
+            let next = (currentIndex + 1) % playlist.count
+            enqueueLoad(playlist[next], autoPlay: true)
+        case .shuffle:
+            enqueueLoad(playlist[randomIndex(excluding: currentIndex)], autoPlay: true)
+        }
     }
 
     func playPrevious() {
-        guard let currentIndex, currentIndex > 0 else { return }
-        enqueueLoad(playlist[currentIndex - 1], autoPlay: true)
+        guard !playlist.isEmpty, let currentIndex else { return }
+        switch playbackMode {
+        case .sequential, .repeatOne:
+            let previous = (currentIndex - 1 + playlist.count) % playlist.count
+            enqueueLoad(playlist[previous], autoPlay: true)
+        case .shuffle:
+            enqueueLoad(playlist[randomIndex(excluding: currentIndex)], autoPlay: true)
+        }
+    }
+
+    /// Prefer a different index when the list has 2+ items.
+    private func randomIndex(excluding current: Int) -> Int {
+        guard playlist.count > 1 else { return max(0, min(current, playlist.count - 1)) }
+        var next = Int.random(in: 0..<playlist.count)
+        var attempts = 0
+        while next == current, attempts < 12 {
+            next = Int.random(in: 0..<playlist.count)
+            attempts += 1
+        }
+        return next
     }
 
     private func enqueueLoad(_ item: PlaylistItem, autoPlay: Bool) {
@@ -1134,12 +1156,8 @@ final class PlayerViewModel {
         isPlaying = false
 
         switch playbackMode {
-        case .sequential:
-            if hasNext {
-                playNext()
-            } else {
-                rewindToStart(andPlay: false)
-            }
+        case .sequential, .shuffle:
+            playNext()
         case .repeatOne:
             rewindToStart(andPlay: true)
         }

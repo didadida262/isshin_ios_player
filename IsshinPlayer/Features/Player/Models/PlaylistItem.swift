@@ -89,8 +89,10 @@ enum PlaybackRate: Float, CaseIterable, Identifiable {
 
 /// What happens when the current video finishes.
 enum PlaybackMode: String, CaseIterable, Identifiable {
-    /// Play the next item; stop (rewound) if this is the last.
+    /// Play the next item; wrap to the first after the last.
     case sequential
+    /// Pick another item at random (avoids immediate repeat when possible).
+    case shuffle
     /// Restart the current item automatically.
     case repeatOne
 
@@ -99,15 +101,17 @@ enum PlaybackMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .sequential: return "顺序播放"
+        case .shuffle: return "随机播放"
         case .repeatOne: return "单集循环"
         }
     }
 
-    /// Thin-line SF Symbols in the NetEase-style loop family.
+    /// Thin-line SF Symbols in the NetEase-style transport family.
     var systemImage: String {
         switch self {
-        case .sequential: return "repeat"      // list loop
-        case .repeatOne: return "repeat.1"     // single loop
+        case .sequential: return "repeat"
+        case .shuffle: return "shuffle"
+        case .repeatOne: return "repeat.1"
         }
     }
 
