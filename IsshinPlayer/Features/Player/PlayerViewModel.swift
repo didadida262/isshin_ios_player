@@ -670,6 +670,20 @@ final class PlayerViewModel {
 
     // MARK: - Playlist
 
+    /// One-shot Finder-style name sort. Import order is otherwise preserved.
+    func sortPlaylistByTitle() {
+        guard playlist.count > 1 else { return }
+        let currentID = currentItem?.id
+        playlist.sort { lhs, rhs in
+            lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+        }
+        if let currentID {
+            currentIndex = playlist.firstIndex(where: { $0.id == currentID })
+        }
+        persistPlaylist()
+        showToast("已按名称排序")
+    }
+
     func selectItem(id: UUID) {
         guard let index = playlist.firstIndex(where: { $0.id == id }) else { return }
         if index == currentIndex, phase == .ready {

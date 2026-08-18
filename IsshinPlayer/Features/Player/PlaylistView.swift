@@ -180,6 +180,23 @@ struct PlaylistView: View {
 
             Button {
                 openSwipeItemID = nil
+                viewModel.sortPlaylistByTitle()
+            } label: {
+                Image(systemName: "textformat")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(
+                        viewModel.playlist.count < 2 ? Theme.textTertiary : Theme.textSecondary
+                    )
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.playlist.count < 2)
+            .accessibilityLabel("按名称排序")
+            .accessibilityHint("将播放列表按文件名称排序")
+
+            Button {
+                openSwipeItemID = nil
                 showClearConfirm = true
             } label: {
                 Image(systemName: "trash")
