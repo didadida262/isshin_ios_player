@@ -75,13 +75,18 @@ struct VideoLibraryPickerView: View {
         }
     }
 
+    private var selectableIDs: Set<String> {
+        Set(assets.lazy.map(\.localIdentifier).filter { !loadedIdentifiers.contains($0) })
+    }
+
+    private var allSelectableSelected: Bool {
+        let ids = selectableIDs
+        return !ids.isEmpty && ids.isSubset(of: selectedIDs)
+    }
+
     private var libraryContent: some View {
         VStack(spacing: 0) {
-            Text(selectedIDs.isEmpty ? "点选要导入的视频" : "已选 \(selectedIDs.count) 个")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+            selectionHeader
 
             if isLoadingLibrary {
                 VStack(spacing: 12) {
@@ -141,6 +146,28 @@ struct VideoLibraryPickerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var selectionHeader: some View {
+        HStack(spacing: 12) {
+            Text(selectedIDs.isEmpty ? "点选要导入的视频" : "已选 \(selectedIDs.count) 个")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if !isLoadingLibrary, !assets.isEmpty {
+                Button(allSelectableSelected ? "取消全选" : "全选") {
+                    toggleSelectAll()
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.brandBlue)
+                .disabled(selectableIDs.isEmpty)
+                .opacity(selectableIDs.isEmpty ? 0.35 : 1)
+                .accessibilityLabel(allSelectableSelected ? "取消全选" : "全选")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
     private func toggle(_ asset: PHAsset) {
         let id = asset.localIdentifier
         guard !loadedIdentifiers.contains(id) else { return }
@@ -148,6 +175,14 @@ struct VideoLibraryPickerView: View {
             selectedIDs.remove(id)
         } else {
             selectedIDs.insert(id)
+        }
+    }
+
+    private func toggleSelectAll() {
+        if allSelectableSelected {
+            selectedIDs.removeAll()
+        } else {
+            selectedIDs = selectableIDs
         }
     }
 
