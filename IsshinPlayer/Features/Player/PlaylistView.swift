@@ -26,29 +26,37 @@ struct PlaylistView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.vertical, 8)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(viewModel.playlist) { item in
-                            let isCurrent = viewModel.currentItem?.id == item.id
-                            SwipeToDeleteRow(
-                                itemID: item.id,
-                                openItemID: $openSwipeItemID,
-                                onDelete: {
-                                    openSwipeItemID = nil
-                                    pendingDeleteItemID = item.id
-                                },
-                                onTap: {
-                                    openSwipeItemID = nil
-                                    viewModel.selectItem(id: item.id)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            ForEach(viewModel.playlist) { item in
+                                let isCurrent = viewModel.currentItem?.id == item.id
+                                SwipeToDeleteRow(
+                                    itemID: item.id,
+                                    openItemID: $openSwipeItemID,
+                                    onDelete: {
+                                        openSwipeItemID = nil
+                                        pendingDeleteItemID = item.id
+                                    },
+                                    onTap: {
+                                        openSwipeItemID = nil
+                                        viewModel.selectItem(id: item.id)
+                                        scrollPlaylistItemToCenter(proxy: proxy, id: item.id)
+                                    }
+                                ) {
+                                    PlaylistCard(item: item, isCurrent: isCurrent)
                                 }
-                            ) {
-                                PlaylistCard(item: item, isCurrent: isCurrent)
+                                .id(item.id)
                             }
                         }
                     }
+                    .scrollIndicators(.visible)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .onChange(of: viewModel.currentItem?.id) { _, newID in
+                        guard let newID else { return }
+                        scrollPlaylistItemToCenter(proxy: proxy, id: newID)
+                    }
                 }
-                .scrollIndicators(.visible)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
         .padding(14)
@@ -150,6 +158,12 @@ struct PlaylistView: View {
             return "将永久删除该文件，并从相册移除原片，且不可恢复。"
         }
         return "将永久删除该文件，且不可恢复。"
+    }
+
+    private func scrollPlaylistItemToCenter(proxy: ScrollViewProxy, id: UUID) {
+        withAnimation(.easeInOut(duration: 0.28)) {
+            proxy.scrollTo(id, anchor: .center)
+        }
     }
 
     private var header: some View {
