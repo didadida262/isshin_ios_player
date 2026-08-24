@@ -30,32 +30,15 @@ struct PlaylistView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
+                        // Rebuild the stack on mode change — LazyVStack reuse otherwise
+                        // keeps stale swipe/checkbox cells after toggling bulk delete.
                         LazyVStack(spacing: 10) {
                             ForEach(viewModel.playlist) { item in
                                 let isCurrent = viewModel.currentItem?.id == item.id
-                                if isBulkDeleteMode {
-                                    bulkDeleteRow(item: item, isCurrent: isCurrent)
-                                        .id(item.id)
-                                } else {
-                                    SwipeToDeleteRow(
-                                        itemID: item.id,
-                                        openItemID: $openSwipeItemID,
-                                        onDelete: {
-                                            openSwipeItemID = nil
-                                            pendingDeleteItemID = item.id
-                                        },
-                                        onTap: {
-                                            openSwipeItemID = nil
-                                            viewModel.selectItem(id: item.id)
-                                            scrollPlaylistItemToCenter(proxy: proxy, id: item.id)
-                                        }
-                                    ) {
-                                        PlaylistCard(item: item, isCurrent: isCurrent)
-                                    }
-                                    .id(item.id)
-                                }
+                                playlistRow(item: item, isCurrent: isCurrent, proxy: proxy)
                             }
                         }
+                        .id(isBulkDeleteMode)
                     }
                     .scrollIndicators(.visible)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -185,24 +168,52 @@ struct PlaylistView: View {
         }
     }
 
-    private func bulkDeleteRow(item: PlaylistItem, isCurrent: Bool) -> some View {
+    @ViewBuilder
+    private func playlistRow(
+        item: PlaylistItem,
+        isCurrent: Bool,
+        proxy: ScrollViewProxy
+    ) -> some View {
         let isSelected = selectedDeleteIDs.contains(item.id)
-        return Button {
-            toggleDeleteSelection(for: item.id)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(isSelected ? Theme.danger : Theme.textTertiary)
-                    .frame(width: 24, height: 24)
 
-                PlaylistCard(item: item, isCurrent: isCurrent)
+        HStack(spacing: isBulkDeleteMode ? 10 : 0) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(isSelected ? Theme.danger : Theme.textTertiary)
+                .frame(width: isBulkDeleteMode ? 24 : 0, height: 24)
+                .clipped()
+                .opacity(isBulkDeleteMode ? 1 : 0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(!isBulkDeleteMode)
+
+            if isBulkDeleteMode {
+                Button {
+                    toggleDeleteSelection(for: item.id)
+                } label: {
+                    PlaylistCard(item: item, isCurrent: isCurrent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.title)
+                .accessibilityValue(isSelected ? "已选中" : "未选中")
+                .accessibilityHint("双击切换选中状态")
+            } else {
+                SwipeToDeleteRow(
+                    itemID: item.id,
+                    openItemID: $openSwipeItemID,
+                    onDelete: {
+                        openSwipeItemID = nil
+                        pendingDeleteItemID = item.id
+                    },
+                    onTap: {
+                        openSwipeItemID = nil
+                        viewModel.selectItem(id: item.id)
+                        scrollPlaylistItemToCenter(proxy: proxy, id: item.id)
+                    }
+                ) {
+                    PlaylistCard(item: item, isCurrent: isCurrent)
+                }
             }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(item.title)
-        .accessibilityValue(isSelected ? "已选中" : "未选中")
-        .accessibilityHint("双击切换选中状态")
     }
 
     private var bulkDeleteWarning: String {
