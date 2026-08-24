@@ -710,10 +710,15 @@ final class PlayerViewModel {
         Task { await permanentlyRemove(item) }
     }
 
+    func removeItems(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        let snapshot = playlist.filter { ids.contains($0.id) }
+        guard !snapshot.isEmpty else { return }
+        Task { await permanentlyRemoveItems(snapshot) }
+    }
+
     func clearPlaylist() {
-        guard !playlist.isEmpty else { return }
-        let snapshot = playlist
-        Task { await permanentlyClear(snapshot) }
+        removeItems(ids: Set(playlist.map(\.id)))
     }
 
     private func permanentlyRemove(_ item: PlaylistItem) async {
@@ -740,7 +745,8 @@ final class PlayerViewModel {
         showToast("已彻底删除")
     }
 
-    private func permanentlyClear(_ snapshot: [PlaylistItem]) async {
+    private func permanentlyRemoveItems(_ snapshot: [PlaylistItem]) async {
+        let deletingAll = snapshot.count == playlist.count
         let photoIDs = snapshot.compactMap(\.assetIdentifier)
         if !photoIDs.isEmpty {
             switch await deleteFromPhotoLibrary(identifiers: photoIDs) {
@@ -781,7 +787,11 @@ final class PlayerViewModel {
         for url in urls {
             Self.permanentlyDeleteImportedFile(at: url)
         }
-        showToast("已彻底删除全部文件")
+        if deletingAll {
+            showToast("已彻底删除全部文件")
+        } else {
+            showToast("已彻底删除 \(snapshot.count) 个文件")
+        }
     }
 
     private func finishLocalRemoval(at index: Int) {

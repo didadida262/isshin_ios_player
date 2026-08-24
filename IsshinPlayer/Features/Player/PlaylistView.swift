@@ -12,6 +12,8 @@ struct PlaylistView: View {
 
     @State private var showImportSource = false
     @State private var showClearConfirm = false
+    @State private var isBulkDeleteMode = false
+    @State private var selectedDeleteIDs: Set<UUID> = []
     @State private var pendingDeleteItemID: UUID?
     @State private var openSwipeItemID: UUID?
 
@@ -31,22 +33,27 @@ struct PlaylistView: View {
                         LazyVStack(spacing: 10) {
                             ForEach(viewModel.playlist) { item in
                                 let isCurrent = viewModel.currentItem?.id == item.id
-                                SwipeToDeleteRow(
-                                    itemID: item.id,
-                                    openItemID: $openSwipeItemID,
-                                    onDelete: {
-                                        openSwipeItemID = nil
-                                        pendingDeleteItemID = item.id
-                                    },
-                                    onTap: {
-                                        openSwipeItemID = nil
-                                        viewModel.selectItem(id: item.id)
-                                        scrollPlaylistItemToCenter(proxy: proxy, id: item.id)
+                                if isBulkDeleteMode {
+                                    bulkDeleteRow(item: item, isCurrent: isCurrent)
+                                        .id(item.id)
+                                } else {
+                                    SwipeToDeleteRow(
+                                        itemID: item.id,
+                                        openItemID: $openSwipeItemID,
+                                        onDelete: {
+                                            openSwipeItemID = nil
+                                            pendingDeleteItemID = item.id
+                                        },
+                                        onTap: {
+                                            openSwipeItemID = nil
+                                            viewModel.selectItem(id: item.id)
+                                            scrollPlaylistItemToCenter(proxy: proxy, id: item.id)
+                                        }
+                                    ) {
+                                        PlaylistCard(item: item, isCurrent: isCurrent)
                                     }
-                                ) {
-                                    PlaylistCard(item: item, isCurrent: isCurrent)
+                                    .id(item.id)
                                 }
-                                .id(item.id)
                             }
                         }
                     }
@@ -109,25 +116,42 @@ struct PlaylistView: View {
         )
     }
 
+    private var pendingBulkDeleteItems: [PlaylistItem] {
+        viewModel.playlist.filter { selectedDeleteIDs.contains($0.id) }
+    }
+
     private var deleteDialogTitle: String {
-        showClearConfirm ? "彻底清空播放列表？" : "彻底删除？"
+        if showClearConfirm {
+            let items = pendingBulkDeleteItems
+            if items.count == viewModel.playlist.count {
+                return "彻底清空播放列表？"
+            }
+            return "彻底删除所选？"
+        }
+        return "彻底删除？"
     }
 
     private var deleteDialogMessage: String {
         if showClearConfirm {
-            return permanentClearWarning
+            return bulkDeleteWarning
         }
         return permanentDeleteWarning(forItemID: pendingDeleteItemID)
     }
 
     private var deleteDialogConfirmTitle: String {
-        showClearConfirm ? "彻底删除全部" : "彻底删除"
+        if showClearConfirm {
+            return pendingBulkDeleteItems.count == viewModel.playlist.count
+                ? "彻底删除全部"
+                : "彻底删除"
+        }
+        return "彻底删除"
     }
 
     private func performPendingDelete() {
         if showClearConfirm {
             openSwipeItemID = nil
-            viewModel.clearPlaylist()
+            viewModel.removeItems(ids: selectedDeleteIDs)
+            exitBulkDeleteMode()
             showClearConfirm = false
             return
         }
@@ -142,12 +166,52 @@ struct PlaylistView: View {
         showClearConfirm = false
     }
 
-    private var permanentClearWarning: String {
-        let photoCount = viewModel.playlist.filter { $0.assetIdentifier != nil }.count
-        if photoCount > 0 {
-            return "将永久删除列表中的全部 \(viewModel.playlist.count) 个文件（含 \(photoCount) 个相册原片），且不可恢复。"
+    private func enterBulkDeleteMode() {
+        openSwipeItemID = nil
+        selectedDeleteIDs = Set(viewModel.playlist.map(\.id))
+        isBulkDeleteMode = true
+    }
+
+    private func exitBulkDeleteMode() {
+        isBulkDeleteMode = false
+        selectedDeleteIDs = []
+    }
+
+    private func toggleDeleteSelection(for id: UUID) {
+        if selectedDeleteIDs.contains(id) {
+            selectedDeleteIDs.remove(id)
+        } else {
+            selectedDeleteIDs.insert(id)
         }
-        return "将永久删除列表中的全部 \(viewModel.playlist.count) 个文件，且不可恢复。"
+    }
+
+    private func bulkDeleteRow(item: PlaylistItem, isCurrent: Bool) -> some View {
+        let isSelected = selectedDeleteIDs.contains(item.id)
+        return Button {
+            toggleDeleteSelection(for: item.id)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(isSelected ? Theme.danger : Theme.textTertiary)
+                    .frame(width: 24, height: 24)
+
+                PlaylistCard(item: item, isCurrent: isCurrent)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.title)
+        .accessibilityValue(isSelected ? "已选中" : "未选中")
+        .accessibilityHint("双击切换选中状态")
+    }
+
+    private var bulkDeleteWarning: String {
+        let items = pendingBulkDeleteItems
+        let photoCount = items.filter { $0.assetIdentifier != nil }.count
+        if photoCount > 0 {
+            return "将永久删除选中的 \(items.count) 个文件（含 \(photoCount) 个相册原片），且不可恢复。"
+        }
+        return "将永久删除选中的 \(items.count) 个文件，且不可恢复。"
     }
 
     private func permanentDeleteWarning(forItemID id: UUID?) -> String {
@@ -169,78 +233,103 @@ struct PlaylistView: View {
     private var header: some View {
         HStack(spacing: 10) {
             HStack(spacing: 10) {
-                Text("播放列表")
+                Text(isBulkDeleteMode ? "选择删除" : "播放列表")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
-                Text("\(viewModel.playlist.count)")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textTertiary)
+                Text(
+                    isBulkDeleteMode
+                        ? "\(selectedDeleteIDs.count)/\(viewModel.playlist.count)"
+                        : "\(viewModel.playlist.count)"
+                )
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
             }
 
-            Button {
-                showImportSource = true
-            } label: {
-                ImportButtonFace(
-                    systemImage: "plus",
-                    isPending: isImportPickerPending
-                )
+            if !isBulkDeleteMode {
+                Button {
+                    showImportSource = true
+                } label: {
+                    ImportButtonFace(
+                        systemImage: "plus",
+                        isPending: isImportPickerPending
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isImportPickerPending)
+                .accessibilityLabel("导入")
+                .accessibilityHint("从照片或文件导入")
             }
-            .buttonStyle(.plain)
-            .disabled(isImportPickerPending)
-            .accessibilityLabel("导入")
-            .accessibilityHint("从照片或文件导入")
 
             Spacer(minLength: 0)
 
-            Button {
-                openSwipeItemID = nil
-                viewModel.sortPlaylistByTitle()
-            } label: {
-                Image(systemName: "textformat")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(
-                        viewModel.playlist.count < 2 ? Theme.textTertiary : Theme.textSecondary
-                    )
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.playlist.count < 2)
-            .accessibilityLabel("按名称排序")
-            .accessibilityHint("将播放列表按文件名称排序")
+            if isBulkDeleteMode {
+                Button("取消") {
+                    exitBulkDeleteMode()
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .buttonStyle(.plain)
+                .accessibilityLabel("取消删除选择")
 
-            Button {
-                openSwipeItemID = nil
-                showClearConfirm = true
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(
-                        viewModel.playlist.isEmpty ? Theme.textTertiary : Theme.danger
-                    )
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.playlist.isEmpty)
-            .accessibilityLabel("彻底清空播放列表")
+                Button("确定") {
+                    guard !selectedDeleteIDs.isEmpty else { return }
+                    showClearConfirm = true
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(selectedDeleteIDs.isEmpty ? Theme.textTertiary : Theme.danger)
+                .buttonStyle(.plain)
+                .disabled(selectedDeleteIDs.isEmpty)
+                .accessibilityLabel("确认删除所选")
+            } else {
+                Button {
+                    openSwipeItemID = nil
+                    viewModel.sortPlaylistByTitle()
+                } label: {
+                    Image(systemName: "textformat")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(
+                            viewModel.playlist.count < 2 ? Theme.textTertiary : Theme.textSecondary
+                        )
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.playlist.count < 2)
+                .accessibilityLabel("按名称排序")
+                .accessibilityHint("将播放列表按文件名称排序")
 
-            Button {
-                openSwipeItemID = nil
-                viewModel.cyclePlaybackMode()
-            } label: {
-                Image(systemName: viewModel.playbackMode.systemImage)
-                    .font(.system(size: 17, weight: .regular))
-                    .symbolRenderingMode(.monochrome)
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-                    .contentTransition(.symbolEffect(.replace))
+                Button {
+                    enterBulkDeleteMode()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(
+                            viewModel.playlist.isEmpty ? Theme.textTertiary : Theme.danger
+                        )
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.playlist.isEmpty)
+                .accessibilityLabel("选择要删除的项目")
+
+                Button {
+                    openSwipeItemID = nil
+                    viewModel.cyclePlaybackMode()
+                } label: {
+                    Image(systemName: viewModel.playbackMode.systemImage)
+                        .font(.system(size: 17, weight: .regular))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(viewModel.playbackMode.title)
+                .accessibilityHint("点击切换播放模式")
+                .animation(.easeInOut(duration: 0.18), value: viewModel.playbackMode)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(viewModel.playbackMode.title)
-            .accessibilityHint("点击切换播放模式")
-            .animation(.easeInOut(duration: 0.18), value: viewModel.playbackMode)
         }
     }
 }
